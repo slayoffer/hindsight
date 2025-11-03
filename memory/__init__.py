@@ -4,7 +4,6 @@ Memory System for AI Agents.
 Temporal + Semantic Memory Architecture using PostgreSQL with pgvector.
 """
 from .temporal_semantic_memory import TemporalSemanticMemory
-from .visualizer import MemoryVisualizer
 from .search_trace import (
     SearchTrace,
     QueryInfo,
@@ -20,7 +19,6 @@ from .search_tracer import SearchTracer
 
 __all__ = [
     "TemporalSemanticMemory",
-    "MemoryVisualizer",
     "SearchTrace",
     "SearchTracer",
     "QueryInfo",

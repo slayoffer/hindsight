@@ -14,6 +14,29 @@ The combination of these three networks enables powerful memory retrieval that g
 
 ## Architecture
 
+### Triple Network Design
+
+The system maintains three separate but interconnected memory networks:
+
+1. **World Network** (`fact_type='world'`)
+   - General knowledge and facts about the world
+   - Information not specific to the agent's actions
+   - Example: "Alice works at Google", "Yosemite is in California"
+
+2. **Agent Network** (`fact_type='agent'`)
+   - Facts about what the AI agent specifically did
+   - Agent's own actions and experiences
+   - Example: "The agent helped debug a Python script", "The agent recommended Yosemite"
+
+3. **Opinion Network** (`fact_type='opinion'`)
+   - Agent's formed opinions and perspectives
+   - Automatically extracted during think operations
+   - Includes reasons and confidence scores (0.0-1.0)
+   - Immutable once formed (event_date = when opinion was formed)
+   - Example: "Python is better for data science than JavaScript (Reasons: has better libraries like pandas and numpy) [confidence: 0.85]"
+
+All three networks share the same infrastructure (temporal/semantic/entity links) but can be searched independently or together. The **think** operation combines all three networks to formulate consistent, contextual answers while forming new opinions.
+
 ### Core Concepts
 
 **Memory Units**: Individual sentence-level memories that are:
@@ -22,6 +45,7 @@ The combination of these three networks enables powerful memory retrieval that g
 - Embedded as vectors for semantic similarity
 - Timestamped for temporal relationships
 - Linked to extracted entities
+- Classified as either 'world' or 'agent' fact type
 
 **Entity Resolution**: Named entities (PERSON, ORG, GPE, etc.) are:
 - Extracted using spaCy NER
@@ -229,7 +253,6 @@ Raw content is processed through an LLM to extract meaningful facts before stora
 - `langchain-text-splitters` - Intelligent text chunking
 - `networkx` - Graph operations
 - `pyvis` - Interactive HTML graph visualization
-- `matplotlib` - Static graph visualization
 - `rich` - Terminal UI
 
 **Models**:
@@ -299,12 +322,120 @@ This will:
 
 Open `memory_graph_interactive.html` in your browser to explore the memory graph!
 
+## Using as a Library (Local Import)
+
+You can import this project from another Poetry project using a local path dependency:
+
+### 1. Add to your project's `pyproject.toml`:
+
+```toml
+[tool.poetry.dependencies]
+memory-poc = {path = "../memory-poc", develop = true}
+```
+
+Or using poetry CLI:
+```bash
+poetry add ../memory-poc --editable
+```
+
+### 2. Import the memory system:
+
+```python
+from memory import TemporalSemanticMemory
+
+# Initialize memory
+memory = TemporalSemanticMemory()
+await memory.initialize()
+
+# Use the memory system
+await memory.put_batch_async(
+    agent_id="my_agent",
+    contents=["Alice works at Google", "Bob loves hiking"],
+    event_date=datetime.now(timezone.utc)
+)
+
+results, trace = await memory.search_async(
+    agent_id="my_agent",
+    query="Who works at Google?"
+)
+```
+
+### 3. Import the FastAPI app:
+
+```python
+from web import app, memory
+
+# Use the FastAPI app in your own project
+# You can mount it as a sub-application or run it directly
+import uvicorn
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+### 4. Example: Extending the FastAPI app
+
+```python
+from fastapi import FastAPI
+from web import app as memory_app, memory
+
+# Create your own app
+my_app = FastAPI()
+
+# Mount the memory app as a sub-application
+my_app.mount("/memory", memory_app)
+
+# Add your own endpoints that use the memory system
+@my_app.post("/my-custom-endpoint")
+async def my_endpoint():
+    # Use the shared memory instance
+    results, _ = await memory.search_async(
+        agent_id="my_agent",
+        query="some query"
+    )
+    return {"results": results}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(my_app, host="0.0.0.0", port=8000)
+```
+
+### Available Exports
+
+**From `memory` package:**
+- `TemporalSemanticMemory` - Main memory system class
+- `SearchTrace`, `SearchTracer` - Search tracing utilities
+- `QueryInfo`, `EntryPoint`, `NodeVisit`, etc. - Trace data structures
+
+**From `web` package:**
+- `app` - FastAPI application instance
+- `memory` - Shared TemporalSemanticMemory instance
+
+### Web Server
+
+To run the web interface:
+
+```bash
+# Development mode with auto-reload
+uvicorn web.server:app --reload --port 8000
+
+# Production mode
+uvicorn web.server:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+Then open http://localhost:8000 in your browser to access the visualization interface.
+
 ## Project Structure
 
 ```
 memory-poc/
 ├── memory/                          # Core memory system package
 │   ├── temporal_semantic_memory.py  # Main memory system class
+│   ├── operations/                  # Modular operation mixins
+│   │   ├── embedding_operations.py  # Embedding generation with process pool
+│   │   ├── link_operations.py       # Entity, temporal, semantic links
+│   │   ├── batch_operations.py      # Placeholder for future extraction
+│   │   └── search_operations.py     # Placeholder for future extraction
 │   ├── entity_resolver.py           # Entity extraction and disambiguation
 │   ├── llm_client.py                # LLM-based fact extraction
 │   └── utils.py                     # Utility functions
@@ -320,15 +451,25 @@ memory-poc/
 └── README.md                       # This file
 ```
 
+The memory system uses a **mixin pattern** for code organization:
+- `TemporalSemanticMemory` inherits from `EmbeddingOperationsMixin` and `LinkOperationsMixin`
+- This reduced the main file from 1,720 lines to 1,420 lines (17% reduction)
+- See `memory/operations/README.md` for detailed refactoring documentation
+
 ## Key Features
 
+✅ **Triple network architecture**: Separate networks for world knowledge, agent actions, and opinions
+✅ **Opinion formation**: Automatically extracts and stores opinions with confidence scores during thinking
 ✅ **Three-layered linking**: Temporal + Semantic + Entity
 ✅ **Entity disambiguation**: Resolves "Alice" across different contexts
 ✅ **Self-contained units**: Pronouns resolved to actual referents
 ✅ **Spreading activation**: Graph-aware search beyond vector similarity
+✅ **Think operation**: Combines all three networks for consistent, contextual answers
+✅ **Confidence scores**: Opinions include confidence ratings (0.0-1.0) based on supporting evidence
 ✅ **Interactive visualization**: Explore memory graph in browser
 ✅ **Recency & frequency weighting**: Recent and important memories boosted
 ✅ **Linguistic validation**: Memory units verified to have subject + verb
+✅ **Modular architecture**: Mixin pattern with 17% code size reduction
 
 ## API Usage
 
@@ -361,6 +502,27 @@ results, trace = memory.search(
 for result in results:
     print(f"{result['text']} (weight: {result['weight']:.3f})")
 
+# Search only world facts
+results, trace = memory.search(
+    agent_id="agent_1",
+    query="What does Alice do?",
+    fact_type="world"  # Only search world network
+)
+
+# Search only agent facts
+results, trace = memory.search(
+    agent_id="agent_1",
+    query="What have I done?",
+    fact_type="agent"  # Only search agent network
+)
+
+# Search only opinions
+results, trace = memory.search(
+    agent_id="agent_1",
+    query="What do I think about Python?",
+    fact_type="opinion"  # Only search opinion network
+)
+
 # Search with tracing for debugging
 results, trace = memory.search(
     agent_id="agent_1",
@@ -387,6 +549,44 @@ results, trace = memory.search(
     weight_frequency=0.10     # De-emphasize frequency
 )
 ```
+
+### Think and Formulate Answers
+
+The `think` operation combines all three networks to formulate consistent, contextual answers:
+
+```python
+result = await memory.think_async(
+    agent_id="agent_1",
+    query="What do you think about Python?",
+    thinking_budget=50,
+    top_k=10
+)
+
+print(result["text"])  # Plain text answer from LLM
+
+# Access facts used to formulate the answer
+for fact in result["based_on"]["world"]:
+    print(f"World: {fact['text']}")
+
+for fact in result["based_on"]["agent"]:
+    print(f"Agent: {fact['text']}")
+
+for fact in result["based_on"]["opinion"]:
+    print(f"Opinion: {fact['text']} (confidence: {fact.get('confidence_score', 'N/A')})")
+
+# Check for newly formed opinions
+for opinion in result["new_opinions"]:
+    print(f"New opinion formed: {opinion['text']} (confidence: {opinion['confidence']})")
+```
+
+The think operation:
+1. Searches the agent network to understand the agent's identity and actions
+2. Searches the world network for relevant general knowledge
+3. Searches the opinion network for existing perspectives
+4. Uses an LLM (Groq by default) to formulate a coherent answer, being consistent with existing opinions
+5. Extracts any new opinions formed during thinking with confidence scores
+6. Stores new opinions with the current timestamp and query context
+7. Returns plain text response with supporting facts from all networks and new opinions
 
 ## How It Works: Example
 

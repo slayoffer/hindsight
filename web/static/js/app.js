@@ -3,11 +3,367 @@ let allGraphData = null;
 let cy = null;
 let debugPanes = [];
 let debugPaneCounter = 0;
+let currentAgentId = null; // Global agent context
+let dataGraphs = {
+    world: null,
+    agent: null,
+    opinions: null
+};
+let dataCache = {
+    world: null,
+    agent: null,
+    opinions: null
+};
+let currentDataSubTab = 'world';
 
-// Load data from API
+// Main tab switching (Data, Debug, Think, Benchmark)
+window.switchMainTab = function(tabName) {
+    // Remove active class from all main tabs and buttons
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+
+    // Activate the selected tab
+    const tabElement = document.getElementById(`${tabName}-tab`);
+    if (tabElement) {
+        tabElement.classList.add('active');
+    }
+
+    // Find and activate the corresponding button
+    const buttons = document.querySelectorAll('.tab-button');
+    buttons.forEach(btn => {
+        const btnText = btn.textContent.toLowerCase();
+        if (
+            (tabName === 'data' && btnText.includes('data')) ||
+            (tabName === 'debug' && btnText.includes('debug')) ||
+            (tabName === 'think' && btnText.includes('think')) ||
+            (tabName === 'benchmark' && btnText.includes('benchmark'))
+        ) {
+            btn.classList.add('active');
+        }
+    });
+
+    // Tab-specific logic
+    if (tabName === 'data') {
+        // Resize current data graph if exists
+        const factType = currentDataSubTab;
+        if (dataGraphs[factType]) {
+            setTimeout(() => dataGraphs[factType].resize(), 10);
+        }
+    } else if (tabName === 'debug') {
+        if (debugPanes.length === 0) {
+            addDebugPane();
+        }
+        debugPanes.forEach(pane => {
+            if (pane.cy) {
+                pane.cy.resize();
+            }
+        });
+    } else if (tabName === 'think') {
+        // Think tab uses global agent selector
+    }
+}
+
+// Data subtab switching (World, Agent, Opinions)
+window.switchDataSubTab = function(subTab) {
+    currentDataSubTab = subTab;
+
+    // Remove active class from all subtab buttons and content
+    document.querySelectorAll('.data-sub-tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelectorAll('.data-subtab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+
+    // Activate selected subtab
+    const buttons = document.querySelectorAll('.data-sub-tab-button');
+    buttons.forEach(btn => {
+        if (btn.textContent.toLowerCase().includes(subTab.toLowerCase())) {
+            btn.classList.add('active');
+        }
+    });
+
+    const subtabElement = document.getElementById(`${subTab}-subtab`);
+    if (subtabElement) {
+        subtabElement.classList.add('active');
+    }
+
+    // Resize graph if exists
+    if (dataGraphs[subTab]) {
+        setTimeout(() => dataGraphs[subTab].resize(), 10);
+    }
+}
+
+// Switch between graph and table view for a fact type
+window.switchDataView = function(factType, viewType) {
+    const graphView = document.getElementById(`${factType}-graph-view`);
+    const tableView = document.getElementById(`${factType}-table-view`);
+    const buttons = document.querySelectorAll(`#${factType}-subtab .view-toggle-button`);
+
+    // Update button states
+    buttons.forEach(btn => {
+        btn.classList.remove('active');
+        if ((viewType === 'graph' && btn.textContent.includes('Graph')) ||
+            (viewType === 'table' && btn.textContent.includes('Table'))) {
+            btn.classList.add('active');
+        }
+    });
+
+    // Show/hide views
+    if (viewType === 'graph') {
+        graphView.style.display = 'block';
+        tableView.style.display = 'none';
+        if (dataGraphs[factType]) {
+            setTimeout(() => dataGraphs[factType].resize(), 10);
+        }
+    } else {
+        graphView.style.display = 'none';
+        tableView.style.display = 'block';
+    }
+}
+
+// Load data for a specific fact type
+window.loadDataView = async function(factType) {
+    if (!currentAgentId) {
+        alert('Please select an agent first');
+        return;
+    }
+
+    try {
+        // Build URL with agent filter and fact_type filter
+        let url = `/api/graph?agent_id=${encodeURIComponent(currentAgentId)}`;
+        if (factType !== 'all') {
+            url += `&fact_type=${factType}`;
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || `HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Validate response structure
+        if (!data || !data.nodes || !data.edges) {
+            throw new Error('Invalid response format from server');
+        }
+
+        // Cache the data
+        dataCache[factType] = data;
+
+        // Update table
+        updateDataTable(factType, data);
+
+        // Update graph if in graph view
+        const graphView = document.getElementById(`${factType}-graph-view`);
+        if (graphView && graphView.style.display !== 'none') {
+            reloadDataGraph(factType);
+        }
+
+        return data;
+    } catch (e) {
+        console.error(`Error loading ${factType} data:`, e);
+        alert(`Error loading ${factType} data: ` + e.message);
+    }
+}
+
+// Reload graph for a specific fact type
+window.reloadDataGraph = function(factType) {
+    const data = dataCache[factType];
+    if (!data) return;
+
+    const nodeLimit = parseInt(document.getElementById(`${factType}-node-limit`).value) || 50;
+    const layoutName = document.getElementById(`${factType}-layout-select`).value;
+
+    // Filter nodes to limit
+    const limitedNodes = data.nodes.slice(0, nodeLimit);
+    const nodeIds = new Set(limitedNodes.map(n => n.data.id));
+
+    // Filter edges to only include those between visible nodes
+    const limitedEdges = data.edges.filter(e =>
+        nodeIds.has(e.data.source) && nodeIds.has(e.data.target)
+    );
+
+    // Update count display
+    document.getElementById(`${factType}-node-count`).textContent =
+        `Showing ${limitedNodes.length} of ${data.nodes.length} nodes`;
+
+    // Destroy existing graph if any
+    if (dataGraphs[factType]) {
+        dataGraphs[factType].destroy();
+    }
+
+    // Layout configurations
+    const layouts = {
+        'circle': {
+            name: 'circle',
+            animate: false,
+            radius: 300,
+            spacingFactor: 1.5
+        },
+        'grid': {
+            name: 'grid',
+            animate: false,
+            rows: Math.ceil(Math.sqrt(limitedNodes.length)),
+            cols: Math.ceil(Math.sqrt(limitedNodes.length)),
+            spacingFactor: 2
+        },
+        'cose': {
+            name: 'cose',
+            animate: false,
+            nodeRepulsion: 15000,
+            idealEdgeLength: 150,
+            edgeElasticity: 100,
+            nestingFactor: 1.2,
+            gravity: 1,
+            numIter: 1000,
+            initialTemp: 200,
+            coolingFactor: 0.95,
+            minTemp: 1.0
+        }
+    };
+
+    // Initialize Cytoscape
+    dataGraphs[factType] = cytoscape({
+        container: document.getElementById(`${factType}-cy`),
+
+        elements: [
+            ...limitedNodes.map(n => ({ data: n.data })),
+            ...limitedEdges.map(e => ({ data: e.data }))
+        ],
+
+        style: [
+            {
+                selector: 'node',
+                style: {
+                    'background-color': 'data(color)',
+                    'label': 'data(label)',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'font-size': '10px',
+                    'font-weight': 'bold',
+                    'text-wrap': 'wrap',
+                    'text-max-width': '100px',
+                    'width': 40,
+                    'height': 40,
+                    'border-width': 2,
+                    'border-color': '#333'
+                }
+            },
+            {
+                selector: 'edge',
+                style: {
+                    'width': 1,
+                    'line-color': 'data(color)',
+                    'line-style': 'data(lineStyle)',
+                    'target-arrow-shape': 'triangle',
+                    'target-arrow-color': 'data(color)',
+                    'curve-style': 'bezier',
+                    'opacity': 0.7
+                }
+            },
+            {
+                selector: 'node:selected',
+                style: {
+                    'border-width': 4,
+                    'border-color': '#000'
+                }
+            }
+        ],
+
+        layout: layouts[layoutName] || layouts['circle']
+    });
+
+    // Add tooltip on hover
+    let tooltip = null;
+    dataGraphs[factType].on('mouseover', 'node', function(evt) {
+        const node = evt.target;
+        const data = node.data();
+        const renderedPosition = node.renderedPosition();
+
+        tooltip = document.createElement('div');
+        tooltip.className = 'tooltip';
+        tooltip.innerHTML = `
+            <b>Text:</b> ${data.text}<br>
+            <b>Context:</b> ${data.context}<br>
+            <b>Date:</b> ${data.date}<br>
+            <b>Entities:</b> ${data.entities}
+        `;
+        tooltip.style.left = renderedPosition.x + 20 + 'px';
+        tooltip.style.top = renderedPosition.y + 'px';
+        document.body.appendChild(tooltip);
+    });
+
+    dataGraphs[factType].on('mouseout', 'node', function(evt) {
+        if (tooltip) {
+            tooltip.remove();
+            tooltip = null;
+        }
+    });
+}
+
+// Update table for a specific fact type
+function updateDataTable(factType, data) {
+    if (!data) return;
+
+    const tbody = document.getElementById(`${factType}-table-body`);
+    const countSpan = document.getElementById(`${factType}-table-count`);
+
+    if (countSpan) {
+        countSpan.textContent = `(${data.total_units})`;
+    }
+
+    if (tbody) {
+        tbody.innerHTML = data.table_rows.map(row => `
+            <tr>
+                <td>${row.id}</td>
+                <td>${row.text}</td>
+                <td>${row.context}</td>
+                <td>${row.date}</td>
+                <td>${row.entities}</td>
+            </tr>
+        `).join('');
+    }
+
+    // Setup table filter
+    const filterInput = document.getElementById(`${factType}-table-filter`);
+    if (filterInput) {
+        filterInput.removeEventListener('input', filterInput._filterHandler);
+        filterInput._filterHandler = function() {
+            const filterValue = this.value.toLowerCase();
+            const rows = document.querySelectorAll(`#${factType}-table-body tr`);
+
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(filterValue)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        };
+        filterInput.addEventListener('input', filterInput._filterHandler);
+    }
+}
+
+// Load data from API (old function - kept for backward compatibility)
 async function loadGraphData() {
     try {
-        const response = await fetch('/api/graph');
+        // Require agent selection
+        if (!currentAgentId) {
+            alert('Please select an agent first');
+            return;
+        }
+
+        // Build URL with agent filter
+        let url = `/api/graph?agent_id=${encodeURIComponent(currentAgentId)}`;
+
+        const response = await fetch(url);
 
         if (!response.ok) {
             const error = await response.json();
@@ -245,41 +601,6 @@ async function loadAgents() {
     }
 }
 
-// Tab switching
-function switchTab(tabName) {
-    document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    document.querySelectorAll('.tab-button').forEach(btn => {
-        btn.classList.remove('active');
-    });
-
-    if (tabName === 'graph') {
-        document.getElementById('graph-tab').classList.add('active');
-        document.querySelectorAll('.tab-button')[0].classList.add('active');
-        if (cy) cy.resize();
-    } else if (tabName === 'table') {
-        document.getElementById('table-tab').classList.add('active');
-        document.querySelectorAll('.tab-button')[1].classList.add('active');
-    } else if (tabName === 'debug') {
-        document.getElementById('debug-tab').classList.add('active');
-        document.querySelectorAll('.tab-button')[2].classList.add('active');
-        // Initialize with one pane if empty
-        if (debugPanes.length === 0) {
-            addDebugPane();
-        }
-        // Resize all debug graphs
-        debugPanes.forEach(pane => {
-            if (pane.cy) {
-                pane.cy.resize();
-            }
-        });
-    } else if (tabName === 'locomo') {
-        document.getElementById('locomo-tab').classList.add('active');
-        document.querySelectorAll('.tab-button')[3].classList.add('active');
-    }
-}
-
 // Debug pane management
 function addDebugPane() {
     const paneId = debugPaneCounter++;
@@ -298,6 +619,14 @@ function addDebugPane() {
                 <div>
                     <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;">Query:</label>
                     <input type="text" id="search-query-${paneId}" placeholder="Enter search query..." style="width: 250px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
+                </div>
+                <div>
+                    <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;">Search Type:</label>
+                    <select id="search-type-${paneId}" style="width: 120px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px;">
+                        <option value="all">All Facts</option>
+                        <option value="world">World Facts</option>
+                        <option value="agent">Agent Facts</option>
+                    </select>
                 </div>
                 <div>
                     <label style="font-weight: bold; display: block; margin-bottom: 3px; font-size: 12px;">Agent:</label>
@@ -459,6 +788,7 @@ window.runSearchInPane = async function(paneId) {
     if (!pane) return;
 
     const query = document.getElementById(`search-query-${paneId}`).value;
+    const searchType = document.getElementById(`search-type-${paneId}`).value;
     const agentId = document.getElementById(`search-agent-${paneId}`).value;
     const thinkingBudget = parseInt(document.getElementById(`search-budget-${paneId}`).value);
     const topK = parseInt(document.getElementById(`search-top-k-${paneId}`).value);
@@ -471,9 +801,17 @@ window.runSearchInPane = async function(paneId) {
     }
 
     try {
+        // Determine endpoint based on search type
+        let endpoint = '/api/search';
+        if (searchType === 'world') {
+            endpoint = '/api/world_search';
+        } else if (searchType === 'agent') {
+            endpoint = '/api/agent_search';
+        }
+
         statusBar.innerHTML = '<span style="color: #ff9800;">🔄 Searching...</span>';
 
-        const response = await fetch('/api/search', {
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1139,19 +1477,281 @@ function highlightMatchingNodes(paneId, searchText) {
     }
 }
 
-// Table filtering
-document.getElementById('table-filter').addEventListener('input', function() {
-    const filterValue = this.value.toLowerCase();
-    const rows = document.querySelectorAll('#memory-table tbody tr');
+// Load agents into global selector
+async function loadGlobalAgents() {
+    try {
+        console.log('Loading global agents...'); // Debug
+        const select = document.getElementById('global-agent-selector');
 
-    rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        if (text.includes(filterValue)) {
-            row.style.display = '';
+        if (!select) {
+            console.error('global-agent-selector element not found!');
+            return;
+        }
+
+        console.log('Fetching /api/agents...'); // Debug
+        const response = await fetch('/api/agents');
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        console.log('Agents data received:', data); // Debug
+
+        // Start with placeholder
+        select.innerHTML = '<option value="">Select an agent...</option>';
+
+        if (data.agents && data.agents.length > 0) {
+            console.log(`Adding ${data.agents.length} agents to dropdown`); // Debug
+            data.agents.forEach(agent => {
+                const option = document.createElement('option');
+                option.value = agent;
+                option.textContent = agent;
+                select.appendChild(option);
+            });
+
+            // Auto-select first agent
+            select.value = data.agents[0];
+            currentAgentId = data.agents[0];
+            console.log('Auto-selected agent:', currentAgentId); // Debug
+
+            // Update UI to show agent is selected
+            updateUIForAgentSelection();
         } else {
-            row.style.display = 'none';
+            console.warn('No agents found in response');
+        }
+    } catch (e) {
+        console.error('Error loading global agents:', e);
+        alert('Failed to load agents: ' + e.message);
+    }
+}
+
+// Handle global agent selection change
+function onGlobalAgentChange() {
+    const select = document.getElementById('global-agent-selector');
+    currentAgentId = select.value || null;
+
+    // Show/hide UI elements based on agent selection
+    updateUIForAgentSelection();
+
+    // Refresh all tabs if agent is selected
+    if (currentAgentId) {
+        refreshAllTabs();
+    }
+}
+
+// Update UI visibility based on agent selection
+function updateUIForAgentSelection() {
+    const hasAgent = !!currentAgentId;
+
+    // Update each data subtab
+    ['world', 'agent', 'opinions'].forEach(factType => {
+        const noAgentMsg = document.getElementById(`${factType}-no-agent-message`);
+        const graphView = document.getElementById(`${factType}-graph-view`);
+        const tableView = document.getElementById(`${factType}-table-view`);
+
+        if (noAgentMsg) noAgentMsg.style.display = hasAgent ? 'none' : 'block';
+        if (graphView) graphView.style.display = hasAgent ? 'none' : 'none'; // Start hidden, load on demand
+        if (tableView) tableView.style.display = hasAgent ? 'none' : 'none'; // Start hidden, load on demand
+    });
+}
+
+// Refresh all tabs with new agent context
+async function refreshAllTabs() {
+    // Clear existing data
+    dataCache = {
+        world: null,
+        agent: null,
+        opinions: null
+    };
+
+    // Destroy existing graphs
+    ['world', 'agent', 'opinions'].forEach(factType => {
+        if (dataGraphs[factType]) {
+            dataGraphs[factType].destroy();
+            dataGraphs[factType] = null;
         }
     });
+
+    // Update active debug panes with new agent
+    debugPanes.forEach(pane => {
+        const agentSelect = document.getElementById(`search-agent-${pane.id}`);
+        if (agentSelect && currentAgentId) {
+            agentSelect.value = currentAgentId;
+        }
+    });
+}
+
+// Run Think query
+window.runThink = async function() {
+    console.log('runThink called'); // Debug log
+
+    const query = document.getElementById('think-query').value;
+    const agentSelect = document.getElementById('global-agent-selector');
+    const agentId = agentSelect ? agentSelect.value : null;
+    const thinkingBudget = parseInt(document.getElementById('think-budget').value);
+    const topK = parseInt(document.getElementById('think-top-k').value);
+
+    console.log('Query:', query, 'Agent:', agentId); // Debug log
+
+    if (!query || query.trim() === '') {
+        alert('Please enter a question');
+        return;
+    }
+
+    if (!agentId) {
+        alert('Please select an agent from the breadcrumb');
+        return;
+    }
+
+    const resultDiv = document.getElementById('think-result');
+    const loadingDiv = document.getElementById('think-loading');
+
+    if (!resultDiv || !loadingDiv) {
+        console.error('Think result divs not found');
+        return;
+    }
+
+    try {
+        // Show loading
+        resultDiv.style.display = 'none';
+        loadingDiv.style.display = 'block';
+
+        console.log('Calling /api/think with', { query, agentId, thinkingBudget, topK }); // Debug log
+
+        const response = await fetch('/api/think', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                query: query,
+                agent_id: agentId,
+                thinking_budget: thinkingBudget,
+                top_k: topK
+            })
+        });
+
+        console.log('Response status:', response.status); // Debug log
+
+        const data = await response.json();
+        console.log('Response data:', data); // Debug log
+
+        if (data.detail) {
+            alert('Error: ' + data.detail);
+            loadingDiv.style.display = 'none';
+            return;
+        }
+
+        // Display answer
+        document.getElementById('think-answer-text').textContent = data.text;
+
+        // Display world facts
+        const worldFactsDiv = document.getElementById('think-world-facts');
+        if (data.based_on.world && data.based_on.world.length > 0) {
+            worldFactsDiv.innerHTML = data.based_on.world.map((fact, idx) => `
+                <div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px; border-left: 3px solid #1976d2;">
+                    <div style="font-size: 13px; color: #333; margin-bottom: 5px;">${fact.text}</div>
+                    <div style="font-size: 11px; color: #666;">
+                        Score: ${fact.score ? fact.score.toFixed(4) : 'N/A'} |
+                        ${fact.context ? 'Context: ' + fact.context : ''}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            worldFactsDiv.innerHTML = '<div style="color: #666; font-style: italic;">No world facts used</div>';
+        }
+
+        // Display agent facts
+        const agentFactsDiv = document.getElementById('think-agent-facts');
+        if (data.based_on.agent && data.based_on.agent.length > 0) {
+            agentFactsDiv.innerHTML = data.based_on.agent.map((fact, idx) => `
+                <div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px; border-left: 3px solid #f57c00;">
+                    <div style="font-size: 13px; color: #333; margin-bottom: 5px;">${fact.text}</div>
+                    <div style="font-size: 11px; color: #666;">
+                        Score: ${fact.score ? fact.score.toFixed(4) : 'N/A'} |
+                        ${fact.context ? 'Context: ' + fact.context : ''}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            agentFactsDiv.innerHTML = '<div style="color: #666; font-style: italic;">No agent facts used</div>';
+        }
+
+        // Display opinions
+        const opinionsDiv = document.getElementById('think-opinions');
+        if (data.based_on.opinion && data.based_on.opinion.length > 0) {
+            opinionsDiv.innerHTML = data.based_on.opinion.map((fact, idx) => `
+                <div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px; border-left: 3px solid #7b1fa2;">
+                    <div style="font-size: 13px; color: #333; margin-bottom: 5px;">${fact.text}</div>
+                    <div style="font-size: 11px; color: #666;">
+                        Score: ${fact.score ? fact.score.toFixed(4) : 'N/A'} |
+                        Confidence: ${fact.confidence_score ? (fact.confidence_score * 100).toFixed(1) + '%' : 'N/A'} |
+                        ${fact.context ? 'Context: ' + fact.context : ''}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            opinionsDiv.innerHTML = '<div style="color: #666; font-style: italic;">No opinions used</div>';
+        }
+
+        // Display new opinions
+        const newOpinionsDiv = document.getElementById('think-new-opinions');
+        const newOpinionsListDiv = document.getElementById('think-new-opinions-list');
+        if (data.new_opinions && data.new_opinions.length > 0) {
+            newOpinionsListDiv.innerHTML = data.new_opinions.map((opinion, idx) => `
+                <div style="margin-bottom: 15px; padding: 15px; background: white; border-radius: 6px; border-left: 4px solid #4caf50; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                        <span style="background: #4caf50; color: white; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; margin-right: 10px;">NEW</span>
+                        <span style="color: #666; font-size: 12px;">#${idx + 1}</span>
+                    </div>
+                    <div style="font-size: 14px; color: #333; line-height: 1.5;">${opinion}</div>
+                </div>
+            `).join('');
+            newOpinionsDiv.style.display = 'block';
+        } else {
+            newOpinionsDiv.style.display = 'none';
+        }
+
+        // Show result
+        loadingDiv.style.display = 'none';
+        resultDiv.style.display = 'block';
+
+    } catch (e) {
+        console.error('Error running Think:', e);
+        alert('Error: ' + e.message);
+        loadingDiv.style.display = 'none';
+    }
+};
+
+// Initialize global agent selector on page load
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM Content Loaded - initializing...'); // Debug
+
+    // Add change listener to global agent selector
+    const agentSelector = document.getElementById('global-agent-selector');
+    if (agentSelector) {
+        console.log('Found global-agent-selector, adding change listener'); // Debug
+        agentSelector.addEventListener('change', onGlobalAgentChange);
+    } else {
+        console.error('global-agent-selector not found in DOM!'); // Debug
+    }
+
+    // Add Enter key listener for Think query input
+    const thinkQuery = document.getElementById('think-query');
+    if (thinkQuery) {
+        thinkQuery.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                runThink();
+            }
+        });
+    }
+
+    // Initialize UI visibility
+    updateUIForAgentSelection();
+
+    // Load agents
+    loadGlobalAgents();
 });
 
 // Don't auto-load data on page load - wait for user to click load button

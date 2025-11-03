@@ -1,6 +1,7 @@
 """
 Tests for document tracking and upsert functionality.
 """
+import logging
 import os
 import pytest
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ async def test_document_creation_and_retrieval():
         pytest.skip("DATABASE_URL not set")
 
     memory = TemporalSemanticMemory(db_url=db_url)
+    await memory.initialize()
 
     try:
         agent_id = f"test_doc_{datetime.now(timezone.utc).timestamp()}"
@@ -51,6 +53,7 @@ async def test_document_upsert():
         pytest.skip("DATABASE_URL not set")
 
     memory = TemporalSemanticMemory(db_url=db_url)
+    await memory.initialize()
 
     try:
         agent_id = f"test_upsert_{datetime.now(timezone.utc).timestamp()}"
@@ -100,6 +103,7 @@ async def test_document_deletion():
         pytest.skip("DATABASE_URL not set")
 
     memory = TemporalSemanticMemory(db_url=db_url)
+    await memory.initialize()
 
     try:
         agent_id = f"test_delete_{datetime.now(timezone.utc).timestamp()}"
@@ -139,6 +143,7 @@ async def test_memory_without_document():
         pytest.skip("DATABASE_URL not set")
 
     memory = TemporalSemanticMemory(db_url=db_url)
+    await memory.initialize()
 
     try:
         agent_id = f"test_no_doc_{datetime.now(timezone.utc).timestamp()}"

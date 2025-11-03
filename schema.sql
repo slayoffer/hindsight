@@ -27,9 +27,13 @@ CREATE TABLE IF NOT EXISTS memory_units (
     embedding vector(384),  -- bge-small-en-v1.5 dimension
     context TEXT,  -- What was happening when this memory was formed
     event_date TIMESTAMPTZ NOT NULL,  -- When the event occurred
+    fact_type TEXT NOT NULL DEFAULT 'world',  -- 'world' (general facts), 'agent' (agent actions), or 'opinion' (agent opinions)
+    confidence_score FLOAT,  -- Confidence score for opinions (0.0 to 1.0, only used for fact_type='opinion')
     access_count INTEGER DEFAULT 0,  -- For recency/frequency weighting
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (fact_type IN ('world', 'agent', 'opinion')),
+    CHECK (confidence_score IS NULL OR (confidence_score >= 0.0 AND confidence_score <= 1.0))
 );
 
 -- Entities: Resolved entities (people, organizations, locations, etc.)
@@ -108,6 +112,8 @@ CREATE INDEX IF NOT EXISTS idx_memory_units_document_id ON memory_units(document
 CREATE INDEX IF NOT EXISTS idx_memory_units_event_date ON memory_units(event_date DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_units_agent_date ON memory_units(agent_id, event_date DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_units_access_count ON memory_units(access_count DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_units_fact_type ON memory_units(fact_type);
+CREATE INDEX IF NOT EXISTS idx_memory_units_agent_fact_type ON memory_units(agent_id, fact_type);
 
 -- Vector similarity index (HNSW for fast approximate nearest neighbor)
 CREATE INDEX IF NOT EXISTS idx_memory_units_embedding ON memory_units

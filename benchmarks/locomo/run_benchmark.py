@@ -37,6 +37,7 @@ async def run_benchmark(
     answer_generator = LoComoAnswerGenerator()
     answer_evaluator = LoComoAnswerEvaluator()
     memory = TemporalSemanticMemory()
+    await memory.initialize()
 
     # Create benchmark runner
     runner = BenchmarkRunner(
@@ -130,7 +131,7 @@ def generate_markdown_table(results: dict):
 
 if __name__ == "__main__":
     import logging
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
     parser = argparse.ArgumentParser(description='Run LoComo benchmark')
     parser.add_argument('--max-conversations', type=int, default=None, help='Maximum conversations to evaluate')

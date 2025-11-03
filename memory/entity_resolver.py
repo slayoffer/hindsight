@@ -4,7 +4,6 @@ Entity extraction and resolution for memory system.
 Uses spaCy for entity extraction and implements resolution logic
 to disambiguate entities across memory units.
 """
-import spacy
 import asyncpg
 from typing import List, Dict, Optional, Set
 from difflib import SequenceMatcher
@@ -13,78 +12,6 @@ from datetime import datetime, timezone
 
 # Load spaCy model (singleton)
 _nlp = None
-
-
-def get_nlp():
-    """Get or load spaCy model."""
-    global _nlp
-    if _nlp is None:
-        _nlp = spacy.load("en_core_web_sm")
-    return _nlp
-
-
-def extract_entities(text: str) -> List[Dict[str, any]]:
-    """
-    Extract entities from text using spaCy.
-
-    Args:
-        text: Input text
-
-    Returns:
-        List of entities with text, type, and span info
-    """
-    nlp = get_nlp()
-    doc = nlp(text)
-
-    entities = []
-    for ent in doc.ents:
-        # Filter to important entity types
-        if ent.label_ in ['PERSON', 'ORG', 'GPE', 'LOC', 'PRODUCT', 'EVENT']:
-            entities.append({
-                'text': ent.text,
-                'type': ent.label_,
-                'start': ent.start_char,
-                'end': ent.end_char,
-            })
-
-    return entities
-
-
-def extract_entities_batch(texts: List[str]) -> List[List[Dict[str, any]]]:
-    """
-    Extract entities from multiple texts in batch (MUCH faster than sequential).
-
-    Uses spaCy's nlp.pipe() for efficient batch processing.
-
-    Args:
-        texts: List of input texts
-
-    Returns:
-        List of entity lists, one per input text
-    """
-    if not texts:
-        return []
-
-    nlp = get_nlp()
-
-    # Process all texts in batch using nlp.pipe (significantly faster!)
-    docs = list(nlp.pipe(texts, batch_size=50))
-
-    all_entities = []
-    for doc in docs:
-        entities = []
-        for ent in doc.ents:
-            # Filter to important entity types
-            if ent.label_ in ['PERSON', 'ORG', 'GPE', 'LOC', 'PRODUCT', 'EVENT']:
-                entities.append({
-                    'text': ent.text,
-                    'type': ent.label_,
-                    'start': ent.start_char,
-                    'end': ent.end_char,
-                })
-        all_entities.append(entities)
-
-    return all_entities
 
 
 class EntityResolver:
@@ -248,14 +175,44 @@ class EntityResolver:
                 entities_to_update
             )
 
-        # Batch create new entities
+        # Batch create new entities using multi-row VALUES
         if entities_to_create:
+            import logging
+            logger = logging.getLogger(__name__)
+            create_start = time.time()
+
+            # Build multi-row VALUES statement
+            # VALUES ($1, $2, ...), ($N+1, $N+2, ...), ...
+            values_clauses = []
+            params = []
+            param_idx = 1
+
             for idx, entity_data in entities_to_create:
-                entity_id = await self._create_entity(
-                    conn, agent_id, entity_data['text'],
-                    entity_data['type'], unit_event_date
-                )
-                entity_ids[idx] = entity_id
+                values_clauses.append(f"(${param_idx}, ${param_idx+1}, ${param_idx+2}, ${param_idx+3}, ${param_idx+4}, ${param_idx+5})")
+                params.extend([
+                    agent_id,
+                    entity_data['text'],
+                    entity_data['type'],
+                    unit_event_date,
+                    unit_event_date,
+                    1
+                ])
+                param_idx += 6
+
+            # Single INSERT with multiple VALUES rows
+            query = f"""
+                INSERT INTO entities (agent_id, canonical_name, entity_type, first_seen, last_seen, mention_count)
+                VALUES {', '.join(values_clauses)}
+                RETURNING id
+            """
+
+            created_rows = await conn.fetch(query, *params)
+
+            # Map created IDs back to original indices
+            for i, (idx, entity_data) in enumerate(entities_to_create):
+                entity_ids[idx] = created_rows[i]['id']
+
+            logger.info(f"        [6.2.2.X] Batch created {len(entities_to_create)} new entities in {time.time() - create_start:.3f}s")
 
         return entity_ids
 

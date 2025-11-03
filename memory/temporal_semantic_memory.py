@@ -27,6 +27,7 @@ from .utils import (
     calculate_frequency_weight,
 )
 from .entity_resolver import EntityResolver
+from .operations import EmbeddingOperationsMixin, LinkOperationsMixin
 
 
 def utcnow():
@@ -76,9 +77,16 @@ def _get_process_pool():
     return _PROCESS_POOL
 
 
-class TemporalSemanticMemory:
+class TemporalSemanticMemory(
+    EmbeddingOperationsMixin,
+    LinkOperationsMixin,
+):
     """
     Advanced memory system using temporal and semantic linking with PostgreSQL.
+
+    Uses mixin architecture for code organization:
+    - EmbeddingOperationsMixin: Embedding generation
+    - LinkOperationsMixin: Entity, temporal, and semantic link creation
     """
 
     def __init__(
@@ -103,11 +111,11 @@ class TemporalSemanticMemory:
                 "Set DATABASE_URL environment variable."
             )
 
-        # Connection pool (created lazily on first use)
+        # Connection pool (will be created in initialize())
         self._pool = None
-        self._pool_lock = asyncio.Lock()
+        self._initialized = False
 
-        # Initialize entity resolver (will be created with pool)
+        # Initialize entity resolver (will be created in initialize())
         self.entity_resolver = None
 
         # Initialize local embedding model (384 dimensions)
@@ -164,90 +172,66 @@ class TemporalSemanticMemory:
                 logger.error(f"Access count worker: Unexpected error: {e}")
                 await asyncio.sleep(1)  # Backoff on error
 
+    async def initialize(self):
+        """Initialize the connection pool and background workers."""
+        if self._initialized:
+            return
+
+        # Create connection pool
+        self._pool = await asyncpg.create_pool(
+            self.db_url,
+            min_size=2,
+            max_size=10,
+            command_timeout=60,
+            statement_cache_size=0  # Disable prepared statement cache
+        )
+
+        # Initialize entity resolver with pool
+        self.entity_resolver = EntityResolver(self._pool)
+
+        # Start access count worker
+        self._access_count_worker_task = asyncio.create_task(self._access_count_worker())
+
+        self._initialized = True
+        logger.info("Memory system initialized (pool and workers started)")
+
     async def _get_pool(self) -> asyncpg.Pool:
-        """Get or create the connection pool (lazy initialization)."""
-        if self._pool is None:
-            async with self._pool_lock:
-                if self._pool is None:
-                    self._pool = await asyncpg.create_pool(
-                        self.db_url,
-                        min_size=2,
-                        max_size=10,
-                        command_timeout=60,
-                        statement_cache_size=0  # Disable prepared statement cache
-                    )
-                    # Initialize entity resolver with pool
-                    if self.entity_resolver is None:
-                        self.entity_resolver = EntityResolver(self._pool)
-
-        # Start access count worker (outside lock, after pool is created)
-        if self._access_count_worker_task is None and self._pool is not None:
-            self._access_count_worker_task = asyncio.create_task(self._access_count_worker())
-
+        """Get the connection pool (must call initialize() first)."""
+        if not self._initialized:
+            await self.initialize()
         return self._pool
 
     async def close(self):
         """Close the connection pool and shutdown background workers."""
+        logger.info("close() started")
+
         # Signal shutdown to worker
         self._shutdown_event.set()
+        logger.info("shutdown event set")
 
         # Cancel and wait for worker task
         if self._access_count_worker_task is not None:
+            logger.debug("cancelling worker task")
             self._access_count_worker_task.cancel()
             try:
+                logger.debug("waiting for worker task to finish")
                 await self._access_count_worker_task
+                logger.debug("worker task finished")
             except asyncio.CancelledError:
-                pass
+                logger.debug("worker task cancelled successfully")
+        else:
+            logger.debug("no worker task to cancel")
 
         # Close pool
         if self._pool is not None:
-            await self._pool.close()
+            logger.debug("closing connection pool")
+            self._pool.terminate()
+            logger.debug("connection pool closed")
             self._pool = None
+        else:
+            logger.debug("no pool to close")
 
-    def _generate_embedding(self, text: str) -> List[float]:
-        """
-        Generate embedding for text using local SentenceTransformer model.
-
-        Args:
-            text: Text to embed
-
-        Returns:
-            384-dimensional embedding vector (bge-small-en-v1.5)
-        """
-        try:
-            embedding = self.embedding_model.encode(text, convert_to_numpy=True, show_progress_bar=False)
-            return embedding.tolist()
-        except Exception as e:
-            raise Exception(f"Failed to generate embedding: {str(e)}")
-
-    async def _generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
-        """
-        Generate embeddings for multiple texts using local model in parallel.
-
-        Uses a ProcessPoolExecutor to achieve TRUE parallelism for CPU-bound
-        embedding generation. Each worker process loads its own model copy.
-
-        When multiple put_async calls run in parallel, each can generate
-        embeddings concurrently in separate processes (no GIL contention).
-
-        Args:
-            texts: List of texts to embed
-
-        Returns:
-            List of 384-dimensional embeddings in same order as input texts
-        """
-        try:
-            # Run in process pool for true parallelism
-            loop = asyncio.get_event_loop()
-            pool = _get_process_pool()
-            embeddings = await loop.run_in_executor(
-                pool,
-                _encode_batch_worker,
-                texts
-            )
-            return embeddings
-        except Exception as e:
-            raise Exception(f"Failed to generate batch embeddings: {str(e)}")
+        logger.debug("close() completed")
 
     async def _find_duplicate_facts_batch(
         self,
@@ -277,32 +261,50 @@ class TemporalSemanticMemory:
         Returns:
             List of booleans - True if fact is a duplicate (should skip), False if new
         """
-        is_duplicate = []
+        if not texts:
+            return []
 
         time_lower = event_date - timedelta(hours=time_window_hours)
         time_upper = event_date + timedelta(hours=time_window_hours)
 
-        for text, embedding in zip(texts, embeddings):
-            # Query for similar facts within time window
-            # Convert embedding list to string for asyncpg vector type
-            embedding_str = str(embedding)
-            result = await conn.fetchrow(
-                """
-                SELECT id, text, 1 - (embedding <=> $1::vector) AS similarity
-                FROM memory_units
-                WHERE agent_id = $2
-                  AND event_date BETWEEN $3 AND $4
-                  AND 1 - (embedding <=> $1::vector) > $5
-                ORDER BY similarity DESC
-                LIMIT 1
-                """,
-                embedding_str, agent_id, time_lower, time_upper, similarity_threshold
-            )
+        # Fetch ALL existing facts in time window ONCE (much faster than N queries)
+        import time as time_mod
+        fetch_start = time_mod.time()
+        existing_facts = await conn.fetch(
+            """
+            SELECT id, text, embedding
+            FROM memory_units
+            WHERE agent_id = $1
+              AND event_date BETWEEN $2 AND $3
+            """,
+            agent_id, time_lower, time_upper
+        )
+        logger.debug(f"      [3.X] Fetched {len(existing_facts)} existing facts in {time_mod.time() - fetch_start:.3f}s")
 
-            if result:
-                is_duplicate.append(True)
-            else:
-                is_duplicate.append(False)
+        # If no existing facts, nothing is duplicate
+        if not existing_facts:
+            return [False] * len(texts)
+
+        # Compute similarities in Python (vectorized with numpy)
+        import numpy as np
+        is_duplicate = []
+
+        # Convert existing embeddings to numpy for faster computation
+        existing_embeddings = np.array([np.array(row['embedding']) for row in existing_facts])
+
+        comp_start = time_mod.time()
+        for embedding in embeddings:
+            # Compute cosine similarity with all existing facts
+            emb_array = np.array(embedding)
+            # Cosine similarity = 1 - cosine distance
+            # For normalized vectors: cosine_sim = dot product
+            similarities = np.dot(existing_embeddings, emb_array)
+
+            # Check if any existing fact is too similar
+            max_similarity = np.max(similarities) if len(similarities) > 0 else 0
+            is_duplicate.append(max_similarity > similarity_threshold)
+
+        logger.debug(f"      [3.X] Computed {len(texts)} x {len(existing_facts)} similarities in {time_mod.time() - comp_start:.3f}s")
 
         return is_duplicate
 
@@ -340,6 +342,8 @@ class TemporalSemanticMemory:
         document_id: Optional[str] = None,
         document_metadata: Optional[Dict[str, Any]] = None,
         upsert: bool = False,
+        fact_type_override: Optional[str] = None,
+        confidence_score: Optional[float] = None,
     ) -> List[str]:
         """
         Store content as memory units with temporal and semantic links (ASYNC version).
@@ -354,6 +358,8 @@ class TemporalSemanticMemory:
             document_id: Optional document ID for tracking and upsert
             document_metadata: Optional metadata about the document
             upsert: If True and document_id exists, delete old units and create new ones
+            fact_type_override: Override fact type ('world', 'agent', 'opinion')
+            confidence_score: Confidence score for opinions (0.0 to 1.0)
 
         Returns:
             List of created unit IDs
@@ -368,7 +374,9 @@ class TemporalSemanticMemory:
             }],
             document_id=document_id,
             document_metadata=document_metadata,
-            upsert=upsert
+            upsert=upsert,
+            fact_type_override=fact_type_override,
+            confidence_score=confidence_score
         )
 
         # Return the first (and only) list of unit IDs
@@ -381,6 +389,8 @@ class TemporalSemanticMemory:
         document_id: Optional[str] = None,
         document_metadata: Optional[Dict[str, Any]] = None,
         upsert: bool = False,
+        fact_type_override: Optional[str] = None,
+        confidence_score: Optional[float] = None,
     ) -> List[List[str]]:
         """
         Store multiple content items as memory units in ONE batch operation.
@@ -399,6 +409,8 @@ class TemporalSemanticMemory:
             document_id: Optional document ID for tracking and upsert
             document_metadata: Optional metadata about the document
             upsert: If True and document_id exists, delete old units and create new ones
+            fact_type_override: Override fact type for all facts ('world', 'agent', 'opinion')
+            confidence_score: Confidence score for opinions (0.0 to 1.0)
 
         Returns:
             List of lists of unit IDs (one list per content item)
@@ -416,10 +428,10 @@ class TemporalSemanticMemory:
             # Returns: [["unit-id-1"], ["unit-id-2"]]
         """
         start_time = time.time()
-        logger.debug(f"\n{'='*60}")
-        logger.debug(f"PUT_BATCH_ASYNC START: {agent_id}")
-        logger.debug(f"Batch size: {len(contents)} content items")
-        logger.debug(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"PUT_BATCH_ASYNC START: {agent_id}")
+        logger.info(f"Batch size: {len(contents)} content items")
+        logger.info(f"{'='*60}")
 
         if not contents:
             return []
@@ -439,12 +451,14 @@ class TemporalSemanticMemory:
 
         # Wait for all fact extractions to complete
         all_fact_results = await asyncio.gather(*[task for task, _, _ in fact_extraction_tasks])
+        logger.info(f"[1] Extract facts (parallel): {len(fact_extraction_tasks)} contents in {time.time() - step_start:.3f}s")
 
         # Flatten and track which facts belong to which content
         all_fact_texts = []
         all_fact_dates = []
         all_contexts = []
         all_fact_entities = []  # NEW: Store LLM-extracted entities per fact
+        all_fact_types = []  # Store fact type (world or agent)
         content_boundaries = []  # [(start_idx, end_idx), ...]
 
         current_idx = 0
@@ -462,6 +476,11 @@ class TemporalSemanticMemory:
                 all_contexts.append(context)
                 # Extract entities from fact (default to empty list if not present)
                 all_fact_entities.append(fact_dict.get('entities', []))
+                # Extract fact type (use override if provided, else use extracted type or default to 'world')
+                if fact_type_override:
+                    all_fact_types.append(fact_type_override)
+                else:
+                    all_fact_types.append(fact_dict.get('fact_type', 'world'))
 
             end_idx = current_idx + len(fact_dicts)
             content_boundaries.append((start_idx, end_idx))
@@ -475,15 +494,20 @@ class TemporalSemanticMemory:
         # Step 2: Generate ALL embeddings in ONE batch (HUGE speedup!)
         step_start = time.time()
         all_embeddings = await self._generate_embeddings_batch(all_fact_texts)
-        logger.debug(f"[2] Generate embeddings (parallel): {len(all_embeddings)} embeddings in {time.time() - step_start:.3f}s")
+        logger.info(f"[2] Generate embeddings (parallel): {len(all_embeddings)} embeddings in {time.time() - step_start:.3f}s")
 
         # Step 3: Process everything in ONE database transaction
+        logger.debug("Getting connection pool")
         pool = await self._get_pool()
+        logger.debug("Acquiring connection from pool")
         async with pool.acquire() as conn:
+            logger.debug("Starting transaction")
             async with conn.transaction():
+                logger.debug("Inside transaction")
                 try:
                     # Handle document tracking and upsert
                     if document_id:
+                        logger.debug(f"Handling document tracking for {document_id}")
                         import hashlib
                         import json
 
@@ -520,18 +544,36 @@ class TemporalSemanticMemory:
                         )
                         logger.debug(f"[3.2] Document '{document_id}' stored/updated")
 
-                    # Deduplication check for all facts
+                    # Deduplication check for all facts (batched by time window)
+                    logger.debug("Starting deduplication check")
                     step_start = time.time()
-                    all_is_duplicate = []
-                    for sentence, embedding, fact_date in zip(all_fact_texts, all_embeddings, all_fact_dates):
+
+                    # Group facts by event_date (rounded to 12-hour buckets) for batching
+                    from collections import defaultdict
+                    time_buckets = defaultdict(list)
+                    for idx, (sentence, embedding, fact_date) in enumerate(zip(all_fact_texts, all_embeddings, all_fact_dates)):
+                        # Round to 12-hour bucket to group similar times
+                        bucket_key = fact_date.replace(hour=(fact_date.hour // 12) * 12, minute=0, second=0, microsecond=0)
+                        time_buckets[bucket_key].append((idx, sentence, embedding, fact_date))
+
+                    # Process each bucket in batch
+                    all_is_duplicate = [False] * total_facts  # Initialize all as not duplicate
+                    for bucket_date, bucket_items in time_buckets.items():
+                        indices = [item[0] for item in bucket_items]
+                        sentences = [item[1] for item in bucket_items]
+                        embeddings = [item[2] for item in bucket_items]
+                        # Use bucket_date as representative for time window
                         dup_flags = await self._find_duplicate_facts_batch(
-                            conn, agent_id, [sentence], [embedding], fact_date
+                            conn, agent_id, sentences, embeddings, bucket_date, time_window_hours=24
                         )
-                        all_is_duplicate.extend(dup_flags)
+                        # Map results back to original indices
+                        for idx, is_dup in zip(indices, dup_flags):
+                            all_is_duplicate[idx] = is_dup
 
                     duplicates_filtered = sum(all_is_duplicate)
                     new_facts = total_facts - duplicates_filtered
-                    logger.debug(f"[3] Deduplication check: {duplicates_filtered} duplicates filtered, {new_facts} new facts in {time.time() - step_start:.3f}s")
+                    logger.debug(f"Deduplication complete: {duplicates_filtered} duplicates filtered, {new_facts} new facts ({len(time_buckets)} time buckets)")
+                    logger.info(f"[3] Deduplication check: {duplicates_filtered} duplicates filtered, {new_facts} new facts in {time.time() - step_start:.3f}s")
 
                     # Filter out duplicates
                     filtered_sentences = [s for s, is_dup in zip(all_fact_texts, all_is_duplicate) if not is_dup]
@@ -539,6 +581,7 @@ class TemporalSemanticMemory:
                     filtered_dates = [d for d, is_dup in zip(all_fact_dates, all_is_duplicate) if not is_dup]
                     filtered_contexts = [c for c, is_dup in zip(all_contexts, all_is_duplicate) if not is_dup]
                     filtered_entities = [ents for ents, is_dup in zip(all_fact_entities, all_is_duplicate) if not is_dup]
+                    filtered_fact_types = [ft for ft, is_dup in zip(all_fact_types, all_is_duplicate) if not is_dup]
 
                     if not filtered_sentences:
                         logger.debug(f"[PUT_BATCH_ASYNC] All facts were duplicates, returning empty")
@@ -548,10 +591,12 @@ class TemporalSemanticMemory:
                     step_start = time.time()
                     # Convert embeddings to strings for asyncpg vector type
                     filtered_embeddings_str = [str(emb) for emb in filtered_embeddings]
+                    # Prepare confidence scores (only for opinions)
+                    confidence_scores = [confidence_score if ft == 'opinion' else None for ft in filtered_fact_types]
                     results = await conn.fetch(
                         """
-                        INSERT INTO memory_units (agent_id, document_id, text, context, embedding, event_date, access_count)
-                        SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::vector[], $6::timestamptz[], $7::integer[])
+                        INSERT INTO memory_units (agent_id, document_id, text, context, embedding, event_date, fact_type, confidence_score, access_count)
+                        SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::vector[], $6::timestamptz[], $7::text[], $8::float[], $9::integer[])
                         RETURNING id
                         """,
                         [agent_id] * len(filtered_sentences),
@@ -560,34 +605,45 @@ class TemporalSemanticMemory:
                         filtered_contexts,
                         filtered_embeddings_str,
                         filtered_dates,
+                        filtered_fact_types,
+                        confidence_scores,
                         [0] * len(filtered_sentences)
                     )
 
                     created_unit_ids = [str(row['id']) for row in results]
-                    logger.debug(f"[5] Batch insert units: {len(created_unit_ids)} units in {time.time() - step_start:.3f}s")
+                    logger.debug(f"Batch insert complete: {len(created_unit_ids)} units created")
+                    logger.info(f"[5] Batch insert units: {len(created_unit_ids)} units in {time.time() - step_start:.3f}s")
 
                     # Process entities for ALL units
+                    logger.debug("Processing entities")
                     step_start = time.time()
                     all_entity_links = await self._extract_entities_batch_optimized(
                         conn, agent_id, created_unit_ids, filtered_sentences, "", filtered_dates, filtered_entities
                     )
-                    logger.debug(f"[6] Process entities (batched): {time.time() - step_start:.3f}s")
+                    logger.debug(f"Entity processing complete: {len(all_entity_links)} links")
+                    logger.info(f"[6] Process entities (batched): {time.time() - step_start:.3f}s")
 
                     # Create temporal links
+                    logger.debug("Creating temporal links")
                     step_start = time.time()
                     await self._create_temporal_links_batch_per_fact(conn, agent_id, created_unit_ids)
-                    logger.debug(f"[7] Batch create temporal links: {time.time() - step_start:.3f}s")
+                    logger.debug("Temporal links complete")
+                    logger.info(f"[7] Batch create temporal links: {time.time() - step_start:.3f}s")
 
                     # Create semantic links
+                    logger.debug("Creating semantic links")
                     step_start = time.time()
                     await self._create_semantic_links_batch(conn, agent_id, created_unit_ids, filtered_embeddings)
-                    logger.debug(f"[8] Batch create semantic links: {time.time() - step_start:.3f}s")
+                    logger.debug("Semantic links complete")
+                    logger.info(f"[8] Batch create semantic links: {time.time() - step_start:.3f}s")
 
                     # Insert entity links
+                    logger.debug("Inserting entity links")
                     step_start = time.time()
                     if all_entity_links:
                         await self._insert_entity_links_batch(conn, all_entity_links)
-                    logger.debug(f"[9] Batch insert entity links: {time.time() - step_start:.3f}s")
+                    logger.debug("Entity links inserted")
+                    logger.info(f"[9] Batch insert entity links: {time.time() - step_start:.3f}s")
 
                     # Transaction auto-commits on success
                     commit_start = time.time()
@@ -607,9 +663,22 @@ class TemporalSemanticMemory:
                         result_unit_ids.append(content_unit_ids)
 
                     total_time = time.time() - start_time
-                    logger.debug(f"\n{'='*60}")
-                    logger.debug(f"PUT_BATCH_ASYNC COMPLETE: {len(created_unit_ids)} units from {len(contents)} contents in {total_time:.3f}s")
-                    logger.debug(f"{'='*60}\n")
+                    logger.info(f"\n{'='*60}")
+                    logger.info(f"PUT_BATCH_ASYNC COMPLETE: {len(created_unit_ids)} units from {len(contents)} contents in {total_time:.3f}s")
+                    logger.info(f"{'='*60}\n")
+
+                    # Trigger opinion reinforcement in background (non-blocking)
+                    # Only trigger if there are entities in the new units
+                    if any(filtered_entities):
+                        asyncio.create_task(
+                            self._reinforce_opinions_async(
+                                agent_id=agent_id,
+                                created_unit_ids=created_unit_ids,
+                                unit_texts=filtered_sentences,
+                                unit_entities=filtered_entities
+                            )
+                        )
+                        logger.debug("[PUT_BATCH_ASYNC] Opinion reinforcement task queued in background")
 
                     return result_unit_ids
 
@@ -631,6 +700,7 @@ class TemporalSemanticMemory:
         weight_recency: float = 0.25,
         weight_frequency: float = 0.15,
         mmr_lambda: float = 0.5,
+        fact_type: Optional[str] = None,
     ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
         """
         Search memories using spreading activation (synchronous wrapper).
@@ -649,6 +719,7 @@ class TemporalSemanticMemory:
             weight_recency: Weight for recency component (default: 0.25)
             weight_frequency: Weight for frequency component (default: 0.15)
             mmr_lambda: Lambda for MMR diversification (0=max diversity, 1=no diversity, default: 0.5)
+            fact_type: Optional filter for fact type ('world' or 'agent')
 
         Returns:
             Tuple of (results, trace)
@@ -656,7 +727,7 @@ class TemporalSemanticMemory:
         # Run async version synchronously
         return asyncio.run(self.search_async(
             agent_id, query, thinking_budget, top_k, enable_trace,
-            weight_activation, weight_semantic, weight_recency, weight_frequency, mmr_lambda
+            weight_activation, weight_semantic, weight_recency, weight_frequency, mmr_lambda, fact_type
         ))
 
     async def search_async(
@@ -671,6 +742,7 @@ class TemporalSemanticMemory:
         weight_recency: float = 0.25,
         weight_frequency: float = 0.15,
         mmr_lambda: float = 0.5,
+        fact_type: Optional[str] = None,
     ) -> tuple[List[Dict[str, Any]], Optional[Any]]:
         """
         Search memories using spreading activation (ASYNC version).
@@ -727,19 +799,36 @@ class TemporalSemanticMemory:
                 if conn_acquire_time > 0.1:  # Log if waiting > 100ms
                     log_buffer.append(f"      [2.1] Waited {conn_acquire_time:.3f}s for connection (pool busy)")
 
-                entry_points = await conn.fetch(
-                    """
-                    SELECT id, text, context, event_date, access_count, embedding,
-                           1 - (embedding <=> $1::vector) AS similarity
-                    FROM memory_units
-                    WHERE agent_id = $2
-                      AND embedding IS NOT NULL
-                      AND (1 - (embedding <=> $1::vector)) >= 0.5
-                    ORDER BY embedding <=> $1::vector
-                    LIMIT 3
-                    """,
-                    query_embedding_str, agent_id
-                )
+                # Build entry point query with optional fact_type filter
+                if fact_type:
+                    entry_points = await conn.fetch(
+                        """
+                        SELECT id, text, context, event_date, access_count, embedding,
+                               1 - (embedding <=> $1::vector) AS similarity
+                        FROM memory_units
+                        WHERE agent_id = $2
+                          AND embedding IS NOT NULL
+                          AND fact_type = $3
+                          AND (1 - (embedding <=> $1::vector)) >= 0.5
+                        ORDER BY embedding <=> $1::vector
+                        LIMIT 3
+                        """,
+                        query_embedding_str, agent_id, fact_type
+                    )
+                else:
+                    entry_points = await conn.fetch(
+                        """
+                        SELECT id, text, context, event_date, access_count, embedding,
+                               1 - (embedding <=> $1::vector) AS similarity
+                        FROM memory_units
+                        WHERE agent_id = $2
+                          AND embedding IS NOT NULL
+                          AND (1 - (embedding <=> $1::vector)) >= 0.5
+                        ORDER BY embedding <=> $1::vector
+                        LIMIT 3
+                        """,
+                        query_embedding_str, agent_id
+                    )
 
             step_duration = time.time() - step_start
             log_buffer.append(f"  [2] Find entry points: {len(entry_points)} found in {step_duration:.3f}s")
@@ -814,19 +903,37 @@ class TemporalSemanticMemory:
                     # Convert string UUIDs to UUID type for faster matching
                     substep_start = time.time()
                     uuid_array = [uuid.UUID(nid) for nid in node_ids]
-                    all_neighbors = await conn.fetch(
-                        """
-                        SELECT ml.from_unit_id, ml.to_unit_id, ml.weight, ml.link_type, ml.entity_id,
-                               mu.text, mu.context, mu.event_date, mu.access_count,
-                               mu.id as neighbor_id
-                        FROM memory_links ml
-                        JOIN memory_units mu ON ml.to_unit_id = mu.id
-                        WHERE ml.from_unit_id = ANY($1::uuid[])
-                          AND ml.weight >= 0.1
-                        ORDER BY ml.from_unit_id, ml.weight DESC
-                        """,
-                        uuid_array
-                    )
+
+                    # Build neighbor query with optional fact_type filter
+                    if fact_type:
+                        all_neighbors = await conn.fetch(
+                            """
+                            SELECT ml.from_unit_id, ml.to_unit_id, ml.weight, ml.link_type, ml.entity_id,
+                                   mu.text, mu.context, mu.event_date, mu.access_count,
+                                   mu.id as neighbor_id
+                            FROM memory_links ml
+                            JOIN memory_units mu ON ml.to_unit_id = mu.id
+                            WHERE ml.from_unit_id = ANY($1::uuid[])
+                              AND ml.weight >= 0.1
+                              AND mu.fact_type = $2
+                            ORDER BY ml.from_unit_id, ml.weight DESC
+                            """,
+                            uuid_array, fact_type
+                        )
+                    else:
+                        all_neighbors = await conn.fetch(
+                            """
+                            SELECT ml.from_unit_id, ml.to_unit_id, ml.weight, ml.link_type, ml.entity_id,
+                                   mu.text, mu.context, mu.event_date, mu.access_count,
+                                   mu.id as neighbor_id
+                            FROM memory_links ml
+                            JOIN memory_units mu ON ml.to_unit_id = mu.id
+                            WHERE ml.from_unit_id = ANY($1::uuid[])
+                              AND ml.weight >= 0.1
+                            ORDER BY ml.from_unit_id, ml.weight DESC
+                            """,
+                            uuid_array
+                        )
                     neighbor_query_time = time.time() - substep_start
                     if neighbor_query_time > 1.0:  # Log slow neighbor queries
                         log_buffer.append(f"      [3.3.3] Slow NEIGHBOR query: {neighbor_query_time:.3f}s for {len(node_ids)} nodes → {len(all_neighbors)} neighbors")
@@ -1309,303 +1416,630 @@ class TemporalSemanticMemory:
                 except Exception as e:
                     raise Exception(f"Failed to delete agent data: {str(e)}")
 
-    async def _extract_entities_batch_optimized(
-        self,
-        conn,
-        agent_id: str,
-        unit_ids: List[str],
-        sentences: List[str],
-        context: str,
-        fact_dates: List,
-        llm_entities: List[List[Dict]],  # NEW: Entities from LLM
-    ) -> List[tuple]:
+    async def list_agents(self) -> List[str]:
         """
-        Process LLM-extracted entities for ALL facts in batch.
+        Get list of all agent IDs in the database.
 
-        Uses entities provided by the LLM (no spaCy needed), then resolves
-        and links them in bulk.
-
-        Returns list of tuples for batch insertion: (from_unit_id, to_unit_id, link_type, weight, entity_id)
+        Returns:
+            List of agent IDs
         """
-        try:
-            # Step 1: Convert LLM entities to the format expected by entity resolver
-            substep_start = time.time()
-            all_entities = []
-            for entity_list in llm_entities:
-                # Convert List[Entity] or List[dict] to List[Dict] format
-                formatted_entities = []
-                for ent in entity_list:
-                    # Handle both Entity objects and dicts
-                    if hasattr(ent, 'text'):
-                        formatted_entities.append({'text': ent.text, 'type': ent.type})
-                    elif isinstance(ent, dict):
-                        formatted_entities.append({'text': ent.get('text', ''), 'type': ent.get('type', 'CONCEPT')})
-                all_entities.append(formatted_entities)
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            # Get distinct agent IDs from memory_units
+            agents = await conn.fetch("""
+                SELECT DISTINCT agent_id
+                FROM memory_units
+                WHERE agent_id IS NOT NULL
+                ORDER BY agent_id
+            """)
 
-            total_entities = sum(len(ents) for ents in all_entities)
-            logger.debug(f"  [6.1] Process LLM entities: {total_entities} entities from {len(sentences)} facts in {time.time() - substep_start:.3f}s")
+            return [row['agent_id'] for row in agents]
 
-            # Step 2: Resolve entities in BATCH (much faster!)
-            substep_start = time.time()
-            step_6_2_start = time.time()
+    async def get_graph_data(self, agent_id: Optional[str] = None, fact_type: Optional[str] = None):
+        """
+        Get graph data for visualization.
 
-            # [6.2.1] Prepare all entities for batch resolution
-            substep_6_2_1_start = time.time()
-            all_entities_flat = []
-            entity_to_unit = []  # Maps flat index to (unit_id, local_index)
+        Args:
+            agent_id: Filter by agent ID
+            fact_type: Filter by fact type (world, agent, opinion)
 
-            for unit_id, entities, fact_date in zip(unit_ids, all_entities, fact_dates):
-                if not entities:
-                    continue
+        Returns:
+            Dict with nodes, edges, and table_rows
+        """
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            # Get memory units, optionally filtered by agent_id and fact_type
+            query_conditions = []
+            query_params = []
+            param_count = 0
 
-                for local_idx, entity in enumerate(entities):
-                    all_entities_flat.append({
-                        'text': entity['text'],
-                        'type': entity['type'],
-                        'nearby_entities': entities,
-                    })
-                    entity_to_unit.append((unit_id, local_idx, fact_date))
-            logger.debug(f"    [6.2.1] Prepare entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_1_start:.3f}s")
+            if agent_id:
+                param_count += 1
+                query_conditions.append(f"agent_id = ${param_count}")
+                query_params.append(agent_id)
 
-            # Resolve ALL entities in one batch call
-            if all_entities_flat:
-                # [6.2.2] Batch resolve entities
-                substep_6_2_2_start = time.time()
-                # Group by date for batch resolution (most will have same date)
-                entities_by_date = {}
-                for idx, (unit_id, local_idx, fact_date) in enumerate(entity_to_unit):
-                    date_key = fact_date
-                    if date_key not in entities_by_date:
-                        entities_by_date[date_key] = []
-                    entities_by_date[date_key].append((idx, all_entities_flat[idx]))
+            if fact_type:
+                param_count += 1
+                query_conditions.append(f"fact_type = ${param_count}")
+                query_params.append(fact_type)
 
-                # Resolve each date group in batch
-                resolved_entity_ids = [None] * len(all_entities_flat)
-                for fact_date, entities_group in entities_by_date.items():
-                    indices = [idx for idx, _ in entities_group]
-                    entities_data = [entity_data for _, entity_data in entities_group]
+            where_clause = "WHERE " + " AND ".join(query_conditions) if query_conditions else ""
 
-                    batch_resolved = await self.entity_resolver.resolve_entities_batch(
-                        agent_id=agent_id,
-                        entities_data=entities_data,
-                        context=context,
-                        unit_event_date=fact_date,
-                        conn=conn
-                    )
+            units = await conn.fetch(f"""
+                SELECT id, text, event_date, context
+                FROM memory_units
+                {where_clause}
+                ORDER BY event_date
+            """, *query_params)
 
-                    for idx, entity_id in zip(indices, batch_resolved):
-                        resolved_entity_ids[idx] = entity_id
-                logger.debug(f"    [6.2.2] Resolve entities: {len(all_entities_flat)} entities in {time.time() - substep_6_2_2_start:.3f}s")
-
-                # [6.2.3] Create unit-entity links in BATCH
-                substep_6_2_3_start = time.time()
-                # Map resolved entities back to units and collect all (unit, entity) pairs
-                unit_to_entity_ids = {}
-                unit_entity_pairs = []
-                for idx, (unit_id, local_idx, fact_date) in enumerate(entity_to_unit):
-                    if unit_id not in unit_to_entity_ids:
-                        unit_to_entity_ids[unit_id] = []
-
-                    entity_id = resolved_entity_ids[idx]
-                    unit_to_entity_ids[unit_id].append(entity_id)
-                    unit_entity_pairs.append((unit_id, entity_id))
-
-                # Batch insert all unit-entity links (MUCH faster!)
-                await self.entity_resolver.link_units_to_entities_batch(unit_entity_pairs, conn=conn)
-                logger.debug(f"    [6.2.3] Create unit-entity links (batched): {len(unit_entity_pairs)} links in {time.time() - substep_6_2_3_start:.3f}s")
-
-                logger.debug(f"  [6.2] Entity resolution (batched): {len(all_entities_flat)} entities resolved in {time.time() - step_6_2_start:.3f}s")
+            # Get links, filtering to only include links between units of the selected agent
+            unit_ids = [row['id'] for row in units]
+            if unit_ids:
+                links = await conn.fetch("""
+                    SELECT
+                        ml.from_unit_id,
+                        ml.to_unit_id,
+                        ml.link_type,
+                        ml.weight,
+                        e.canonical_name as entity_name
+                    FROM memory_links ml
+                    LEFT JOIN entities e ON ml.entity_id = e.id
+                    WHERE ml.from_unit_id = ANY($1::uuid[]) AND ml.to_unit_id = ANY($1::uuid[])
+                    ORDER BY ml.link_type, ml.weight DESC
+                """, unit_ids)
             else:
-                unit_to_entity_ids = {}
-                logger.debug(f"  [6.2] Entity resolution (batched): 0 entities in {time.time() - step_6_2_start:.3f}s")
+                links = []
 
-            # Step 3: Create entity links between units that share entities
-            substep_start = time.time()
-            # Collect all unique entity IDs
-            all_entity_ids = set()
-            for entity_ids in unit_to_entity_ids.values():
-                all_entity_ids.update(entity_ids)
+            # Get entity information
+            unit_entities = await conn.fetch("""
+                SELECT ue.unit_id, e.canonical_name, e.entity_type
+                FROM unit_entities ue
+                JOIN entities e ON ue.entity_id = e.id
+                ORDER BY ue.unit_id
+            """)
 
-            # For each entity, find all units that reference it (one query per entity)
-            entity_to_units = {}
-            for entity_id in all_entity_ids:
-                rows = await conn.fetch(
-                    """
-                    SELECT unit_id
-                    FROM unit_entities
-                    WHERE entity_id = $1
-                    """,
-                    entity_id
+        # Build entity mapping
+        entity_map = {}
+        for row in unit_entities:
+            unit_id = row['unit_id']
+            entity_name = row['canonical_name']
+            entity_type = row['entity_type']
+            if unit_id not in entity_map:
+                entity_map[unit_id] = []
+            entity_map[unit_id].append(f"{entity_name} ({entity_type})")
+
+        # Build nodes
+        nodes = []
+        for row in units:
+            unit_id = row['id']
+            text = row['text']
+            event_date = row['event_date']
+            context = row['context']
+
+            entities = entity_map.get(unit_id, [])
+            entity_count = len(entities)
+
+            # Color by entity count
+            if entity_count == 0:
+                color = "#e0e0e0"
+            elif entity_count == 1:
+                color = "#90caf9"
+            else:
+                color = "#42a5f5"
+
+            nodes.append({
+                "data": {
+                    "id": str(unit_id),
+                    "label": f"{text[:30]}..." if len(text) > 30 else text,
+                    "text": text,
+                    "date": event_date.isoformat() if event_date else "",
+                    "context": context if context else "",
+                    "entities": ", ".join(entities) if entities else "None",
+                    "color": color
+                }
+            })
+
+        # Build edges
+        edges = []
+        for row in links:
+            from_id = str(row['from_unit_id'])
+            to_id = str(row['to_unit_id'])
+            link_type = row['link_type']
+            weight = row['weight']
+            entity_name = row['entity_name']
+
+            # Color by link type
+            if link_type == 'temporal':
+                color = "#00bcd4"
+                line_style = "dashed"
+            elif link_type == 'semantic':
+                color = "#ff69b4"
+                line_style = "solid"
+            elif link_type == 'entity':
+                color = "#ffd700"
+                line_style = "solid"
+            else:
+                color = "#999999"
+                line_style = "solid"
+
+            edges.append({
+                "data": {
+                    "id": f"{from_id}-{to_id}-{link_type}",
+                    "source": from_id,
+                    "target": to_id,
+                    "linkType": link_type,
+                    "weight": weight,
+                    "entityName": entity_name if entity_name else "",
+                    "color": color,
+                    "lineStyle": line_style
+                }
+            })
+
+        # Build table rows
+        table_rows = []
+        for row in units:
+            unit_id = row['id']
+            entities = entity_map.get(unit_id, [])
+
+            table_rows.append({
+                "id": str(unit_id)[:8] + "...",
+                "text": row['text'],
+                "context": row['context'] if row['context'] else "N/A",
+                "date": row['event_date'].strftime("%Y-%m-%d %H:%M") if row['event_date'] else "N/A",
+                "entities": ", ".join(entities) if entities else "None"
+            })
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "table_rows": table_rows,
+            "total_units": len(units)
+        }
+
+    async def think_async(
+        self,
+        agent_id: str,
+        query: str,
+        thinking_budget: int = 50,
+        top_k: int = 10,
+        model: str = "openai/gpt-oss-120b",
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> Dict[str, Any]:
+        """
+        Think and formulate an answer using agent identity, world facts, and opinions.
+
+        This method:
+        1. Retrieves agent facts (agent's identity and past actions)
+        2. Retrieves world facts (general knowledge)
+        3. Retrieves existing opinions (agent's formed perspectives)
+        4. Uses Groq LLM to formulate an answer
+        5. Extracts and stores any new opinions formed during thinking
+        6. Returns plain text answer and the facts used
+
+        Args:
+            agent_id: Agent identifier
+            query: Question to answer
+            thinking_budget: Number of memory units to explore
+            top_k: Maximum facts to retrieve
+            model: LLM model to use (default: llama-3.3-70b-versatile)
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens in response
+
+        Returns:
+            Dict with:
+                - text: Plain text answer (no markdown)
+                - based_on: Dict with 'world', 'agent', and 'opinion' fact lists
+                - new_opinions: List of newly formed opinions
+        """
+        from openai import AsyncOpenAI
+        from datetime import datetime, timezone
+
+        # Initialize Groq client
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if not groq_api_key:
+            raise ValueError("GROQ_API_KEY environment variable not set")
+
+        client = AsyncOpenAI(
+            api_key=groq_api_key,
+            base_url="https://api.groq.com/openai/v1"
+        )
+
+        # Step 1: Get agent facts (identity)
+        agent_results, _ = await self.search_async(
+            agent_id=agent_id,
+            query=query,
+            thinking_budget=thinking_budget,
+            top_k=top_k,
+            enable_trace=False,
+            fact_type='agent'
+        )
+
+        # Step 2: Get world facts
+        world_results, _ = await self.search_async(
+            agent_id=agent_id,
+            query=query,
+            thinking_budget=thinking_budget,
+            top_k=top_k,
+            enable_trace=False,
+            fact_type='world'
+        )
+
+        # Step 3: Get existing opinions
+        opinion_results, _ = await self.search_async(
+            agent_id=agent_id,
+            query=query,
+            thinking_budget=thinking_budget,
+            top_k=top_k,
+            enable_trace=False,
+            fact_type='opinion'
+        )
+
+        # Step 4: Format facts for LLM
+        agent_facts_text = "\n".join([f"- {fact['text']}" for fact in agent_results]) if agent_results else "None"
+        world_facts_text = "\n".join([f"- {fact['text']}" for fact in world_results]) if world_results else "None"
+        opinion_facts_text = "\n".join([f"- {fact['text']}" for fact in opinion_results]) if opinion_results else "None"
+
+        # Step 5: Call Groq to formulate answer
+        prompt = f"""You are an AI assistant answering a question based on retrieved facts.
+
+AGENT IDENTITY (what the agent has done):
+{agent_facts_text}
+
+WORLD FACTS (general knowledge):
+{world_facts_text}
+
+YOUR EXISTING OPINIONS (perspectives you've formed):
+{opinion_facts_text}
+
+QUESTION: {query}
+
+Provide a helpful, accurate answer based on the facts above. Be consistent with your existing opinions. If the facts don't contain enough information to answer the question, say so clearly. Do not use markdown formatting - respond in plain text only.
+
+If you form any new opinions while thinking about this question, state them clearly in your answer."""
+
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a helpful AI assistant. Always respond in plain text without markdown formatting. You can form and express opinions based on facts."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+
+        answer_text = response.choices[0].message.content.strip()
+
+        # Step 6: Extract new opinions from the answer
+        new_opinions = await self._extract_opinions_from_text(
+            client=client,
+            text=answer_text,
+            model=model
+        )
+
+        # Step 7: Store new opinions
+        if new_opinions:
+            current_time = datetime.now(timezone.utc)
+            for opinion_dict in new_opinions:
+                await self.put_async(
+                    agent_id=agent_id,
+                    content=opinion_dict["text"],
+                    context=f"formed during thinking about: {query}",
+                    event_date=current_time,
+                    fact_type_override='opinion',
+                    confidence_score=opinion_dict["confidence"]
                 )
-                entity_to_units[entity_id] = [row['unit_id'] for row in rows]
 
-            # Create bidirectional links between units that share entities
-            links = []
-            for entity_id, units_with_entity in entity_to_units.items():
-                # For each pair of units with this entity, create bidirectional links
-                for i, unit_id_1 in enumerate(units_with_entity):
-                    for unit_id_2 in units_with_entity[i+1:]:
-                        # Bidirectional links
-                        links.append((unit_id_1, unit_id_2, 'entity', 1.0, entity_id))
-                        links.append((unit_id_2, unit_id_1, 'entity', 1.0, entity_id))
+        # Step 8: Return response with facts split by type
+        return {
+            "text": answer_text,
+            "based_on": {
+                "world": world_results,
+                "agent": agent_results,
+                "opinion": opinion_results
+            },
+            "new_opinions": new_opinions
+        }
 
-            logger.debug(f"  [6.3] Entity link creation: {len(links)} links for {len(all_entity_ids)} unique entities in {time.time() - substep_start:.3f}s")
+    async def _extract_opinions_from_text(
+        self,
+        client,
+        text: str,
+        model: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract opinions with reasons and confidence from text using LLM.
 
-            return links
+        Args:
+            client: OpenAI client
+            text: Text to extract opinions from
+            model: LLM model to use
+
+        Returns:
+            List of dicts with keys: 'text' (opinion with reasons), 'confidence' (score 0-1)
+        """
+        from pydantic import BaseModel, Field
+
+        class Opinion(BaseModel):
+            """An opinion formed by the agent."""
+            opinion: str = Field(description="The opinion or perspective formed")
+            reasons: str = Field(description="The reasons supporting this opinion")
+            confidence: float = Field(description="Confidence score for this opinion (0.0 to 1.0, where 1.0 is very confident)")
+
+        class OpinionExtractionResponse(BaseModel):
+            """Response containing extracted opinions."""
+            opinions: List[Opinion] = Field(
+                default_factory=list,
+                description="List of opinions formed with their supporting reasons and confidence scores"
+            )
+
+        extraction_prompt = f"""Extract any opinions or perspectives that were formed in the following text.
+An opinion is a judgment, viewpoint, or conclusion that goes beyond just stating facts.
+
+TEXT:
+{text}
+
+For each opinion found, provide:
+1. The opinion itself
+2. The reasons or facts that support it
+3. A confidence score (0.0 to 1.0) indicating how confident the agent is in this opinion based on the available information
+
+If no clear opinions are expressed, return an empty list."""
+
+        try:
+            response = await client.beta.chat.completions.parse(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You extract opinions and perspectives from text."},
+                    {"role": "user", "content": extraction_prompt}
+                ],
+                response_format=OpinionExtractionResponse
+            )
+
+            result = response.choices[0].message.parsed
+
+            # Format opinions with reasons included in the text and confidence score
+            formatted_opinions = []
+            for op in result.opinions:
+                # Combine opinion and reasons into a single statement
+                opinion_with_reasons = f"{op.opinion} (Reasons: {op.reasons})"
+                formatted_opinions.append({
+                    "text": opinion_with_reasons,
+                    "confidence": op.confidence
+                })
+
+            return formatted_opinions
 
         except Exception as e:
-            logger.error(f" Failed to extract entities in batch: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            # Re-raise to trigger rollback at put_async level
-            raise
+            logger.warning(f"Failed to extract opinions: {str(e)}")
+            return []
 
-    async def _create_temporal_links_batch_per_fact(
+    async def _evaluate_opinion_update_async(
         self,
-        conn,
-        agent_id: str,
-        unit_ids: List[str],
-        time_window_hours: int = 24,
-    ):
+        client,
+        opinion_text: str,
+        opinion_confidence: float,
+        new_event_text: str,
+        entity_name: str,
+        model: str = "llama-3.3-70b-versatile",
+    ) -> Optional[Dict[str, Any]]:
         """
-        Create temporal links for multiple units, each with their own event_date.
+        Evaluate if an opinion should be updated based on a new event.
 
-        Queries the event_date for each unit from the database and creates temporal
-        links based on individual dates (supports per-fact dating).
+        Args:
+            client: OpenAI client
+            opinion_text: Current opinion text (includes reasons)
+            opinion_confidence: Current confidence score (0.0-1.0)
+            new_event_text: Text of the new event
+            entity_name: Name of the entity this opinion is about
+            model: LLM model to use
+
+        Returns:
+            Dict with 'action' ('keep'|'update'), 'new_confidence', 'new_text' (if action=='update')
+            or None if no changes needed
         """
-        if not unit_ids:
-            return
+        from pydantic import BaseModel, Field
+
+        class OpinionEvaluation(BaseModel):
+            """Evaluation of whether an opinion should be updated."""
+            action: str = Field(description="Action to take: 'keep' (no change) or 'update' (modify opinion)")
+            reasoning: str = Field(description="Brief explanation of why this action was chosen")
+            new_confidence: float = Field(description="New confidence score (0.0-1.0). Can be higher, lower, or same as before.")
+            new_opinion_text: Optional[str] = Field(
+                default=None,
+                description="If action is 'update', the revised opinion text that acknowledges the previous view. Otherwise None."
+            )
+
+        evaluation_prompt = f"""You are evaluating whether an existing opinion should be updated based on new information.
+
+ENTITY: {entity_name}
+
+EXISTING OPINION:
+{opinion_text}
+Current confidence: {opinion_confidence:.2f}
+
+NEW EVENT:
+{new_event_text}
+
+Evaluate whether this new event:
+1. REINFORCES the opinion (increase confidence, keep text)
+2. WEAKENS the opinion (decrease confidence, keep text)
+3. CHANGES the opinion (update both text and confidence, noting "Previously I thought X, but now Y...")
+4. IRRELEVANT (keep everything as is)
+
+Guidelines:
+- Only suggest 'update' action if the new event genuinely contradicts or significantly modifies the opinion
+- If updating the text, acknowledge the previous opinion and explain the change
+- Confidence should reflect accumulated evidence (0.0 = no confidence, 1.0 = very confident)
+- Small changes in confidence are normal; large jumps should be rare"""
 
         try:
-            # Get the event_date for each new unit
-            rows = await conn.fetch(
-                """
-                SELECT id, event_date
-                FROM memory_units
-                WHERE id::text = ANY($1)
-                """,
-                unit_ids
+            response = await client.beta.chat.completions.parse(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You evaluate and update opinions based on new information."},
+                    {"role": "user", "content": evaluation_prompt}
+                ],
+                response_format=OpinionEvaluation,
+                temperature=0.3  # Lower temperature for more consistent evaluation
             )
-            new_units = {str(row['id']): row['event_date'] for row in rows}
 
-            # Create links based on each unit's individual event_date
-            links = []
-            for unit_id, unit_event_date in new_units.items():
-                # Find units within the time window of THIS specific unit
-                recent_units = await conn.fetch(
+            result = response.choices[0].message.parsed
+
+            # Only return updates if something actually changed
+            if result.action == 'keep' and abs(result.new_confidence - opinion_confidence) < 0.01:
+                return None
+
+            return {
+                'action': result.action,
+                'reasoning': result.reasoning,
+                'new_confidence': result.new_confidence,
+                'new_text': result.new_opinion_text if result.action == 'update' else None
+            }
+
+        except Exception as e:
+            logger.warning(f"Failed to evaluate opinion update: {str(e)}")
+            return None
+
+    async def _reinforce_opinions_async(
+        self,
+        agent_id: str,
+        created_unit_ids: List[str],
+        unit_texts: List[str],
+        unit_entities: List[List[Dict[str, str]]],
+        model: str = "llama-3.3-70b-versatile",
+    ):
+        """
+        Background task to reinforce opinions based on newly ingested events.
+
+        This runs asynchronously and does not block the put operation.
+
+        Args:
+            agent_id: Agent ID
+            created_unit_ids: List of newly created memory unit IDs
+            unit_texts: Texts of the newly created units
+            unit_entities: Entities extracted from each unit
+            model: LLM model to use for evaluation
+        """
+        try:
+            # Extract all unique entity names from the new units
+            entity_names = set()
+            for entities_list in unit_entities:
+                for entity in entities_list:
+                    entity_names.add(entity['text'])
+
+            if not entity_names:
+                logger.debug("[REINFORCE] No entities found in new units, skipping opinion reinforcement")
+                return
+
+            logger.debug(f"[REINFORCE] Starting opinion reinforcement for {len(entity_names)} entities")
+
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                # Find all opinions related to these entities
+                opinions = await conn.fetch(
                     """
-                    SELECT id, event_date
-                    FROM memory_units
-                    WHERE agent_id = $1
-                      AND id != $2
-                      AND event_date BETWEEN $3 AND $4
-                    ORDER BY event_date DESC
-                    LIMIT 10
+                    SELECT DISTINCT mu.id, mu.text, mu.confidence_score, e.canonical_name
+                    FROM memory_units mu
+                    JOIN unit_entities ue ON mu.id = ue.unit_id
+                    JOIN entities e ON ue.entity_id = e.id
+                    WHERE mu.agent_id = $1
+                      AND mu.fact_type = 'opinion'
+                      AND e.canonical_name = ANY($2::text[])
                     """,
                     agent_id,
-                    unit_id,
-                    unit_event_date - timedelta(hours=time_window_hours),
-                    unit_event_date + timedelta(hours=time_window_hours)
+                    list(entity_names)
                 )
 
-                for recent_row in recent_units:
-                    recent_id = recent_row['id']
-                    recent_event_date = recent_row['event_date']
-                    # Calculate temporal proximity weight
-                    time_diff_hours = abs((unit_event_date - recent_event_date).total_seconds() / 3600)
-                    weight = max(0.3, 1.0 - (time_diff_hours / time_window_hours))
-                    links.append((unit_id, str(recent_id), 'temporal', weight, None))
+                if not opinions:
+                    logger.debug("[REINFORCE] No existing opinions found for these entities")
+                    return
 
-            if links:
-                await conn.executemany(
-                    """
-                    INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                    VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
-                    """,
-                    links
+                logger.debug(f"[REINFORCE] Found {len(opinions)} opinions to potentially reinforce")
+
+                # Get OpenAI client
+                from openai import AsyncOpenAI
+                groq_api_key = os.getenv("GROQ_API_KEY")
+                client = AsyncOpenAI(
+                    api_key=groq_api_key,
+                    base_url="https://api.groq.com/openai/v1"
                 )
+
+                # Evaluate each opinion against the new events
+                updates_to_apply = []
+                for opinion in opinions:
+                    opinion_id = str(opinion['id'])
+                    opinion_text = opinion['text']
+                    opinion_confidence = opinion['confidence_score']
+                    entity_name = opinion['canonical_name']
+
+                    # Find all new events mentioning this entity
+                    relevant_events = []
+                    for unit_text, entities_list in zip(unit_texts, unit_entities):
+                        if any(e['text'] == entity_name for e in entities_list):
+                            relevant_events.append(unit_text)
+
+                    if not relevant_events:
+                        continue
+
+                    # Combine all relevant events
+                    combined_events = "\n".join(relevant_events)
+
+                    # Evaluate if opinion should be updated
+                    evaluation = await self._evaluate_opinion_update_async(
+                        client,
+                        opinion_text,
+                        opinion_confidence,
+                        combined_events,
+                        entity_name,
+                        model
+                    )
+
+                    if evaluation:
+                        updates_to_apply.append({
+                            'opinion_id': opinion_id,
+                            'evaluation': evaluation
+                        })
+
+                # Apply all updates in a single transaction
+                if updates_to_apply:
+                    async with conn.transaction():
+                        for update in updates_to_apply:
+                            opinion_id = update['opinion_id']
+                            evaluation = update['evaluation']
+
+                            if evaluation['action'] == 'update' and evaluation['new_text']:
+                                # Update both text and confidence
+                                await conn.execute(
+                                    """
+                                    UPDATE memory_units
+                                    SET text = $1, confidence_score = $2, updated_at = NOW()
+                                    WHERE id = $3
+                                    """,
+                                    evaluation['new_text'],
+                                    evaluation['new_confidence'],
+                                    uuid.UUID(opinion_id)
+                                )
+                                logger.debug(f"[REINFORCE] Updated opinion {opinion_id[:8]}... (action: {evaluation['action']}, confidence: {evaluation['new_confidence']:.2f})")
+                            else:
+                                # Only update confidence
+                                await conn.execute(
+                                    """
+                                    UPDATE memory_units
+                                    SET confidence_score = $1, updated_at = NOW()
+                                    WHERE id = $2
+                                    """,
+                                    evaluation['new_confidence'],
+                                    uuid.UUID(opinion_id)
+                                )
+                                logger.debug(f"[REINFORCE] Updated confidence for opinion {opinion_id[:8]}... (confidence: {evaluation['new_confidence']:.2f})")
+
+                    logger.debug(f"[REINFORCE] Applied {len(updates_to_apply)} opinion updates")
+                else:
+                    logger.debug("[REINFORCE] No opinion updates needed")
 
         except Exception as e:
-            logger.error(f" Failed to create temporal links: {str(e)}")
+            logger.error(f"[REINFORCE] Error during opinion reinforcement: {str(e)}")
             import traceback
             traceback.print_exc()
-            # Re-raise to trigger rollback at put_async level
-            raise
 
-    async def _create_semantic_links_batch(
-        self,
-        conn,
-        agent_id: str,
-        unit_ids: List[str],
-        embeddings: List[List[float]],
-        top_k: int = 5,
-        threshold: float = 0.7,
-    ):
-        """
-        Create semantic links for multiple units efficiently.
-
-        For each unit, finds similar units and creates links.
-        """
-        if not unit_ids or not embeddings:
-            return
-
-        try:
-            all_links = []
-
-            for unit_id, embedding in zip(unit_ids, embeddings):
-                # Find similar units using vector similarity
-                # Convert embedding to string for asyncpg
-                embedding_str = str(embedding)
-                similar_units = await conn.fetch(
-                    """
-                    SELECT id, 1 - (embedding <=> $1::vector) AS similarity
-                    FROM memory_units
-                    WHERE agent_id = $2
-                      AND id != $3
-                      AND embedding IS NOT NULL
-                      AND (1 - (embedding <=> $1::vector)) >= $4
-                    ORDER BY embedding <=> $1::vector
-                    LIMIT $5
-                    """,
-                    embedding_str, agent_id, unit_id, threshold, top_k
-                )
-
-                for row in similar_units:
-                    similar_id = row['id']
-                    similarity = row['similarity']
-                    all_links.append((unit_id, str(similar_id), 'semantic', float(similarity), None))
-
-            if all_links:
-                await conn.executemany(
-                    """
-                    INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                    VALUES ($1, $2, $3, $4, $5)
-                    ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
-                    """,
-                    all_links
-                )
-
-        except Exception as e:
-            logger.error(f" Failed to create semantic links: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            # Re-raise to trigger rollback at put_async level
-            raise
-
-    async def _insert_entity_links_batch(self, conn, links: List[tuple]):
-        """Insert all entity links in a single batch."""
-        if not links:
-            return
-
-        try:
-            await conn.executemany(
-                """
-                INSERT INTO memory_links (from_unit_id, to_unit_id, link_type, weight, entity_id)
-                VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (from_unit_id, to_unit_id, link_type, COALESCE(entity_id, '00000000-0000-0000-0000-000000000000'::uuid)) DO NOTHING
-                """,
-                links
-            )
-        except Exception as e:
-            logger.warning(f" Failed to insert entity links: {str(e)}")

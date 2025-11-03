@@ -4,7 +4,6 @@ FastAPI server for memory graph visualization and API.
 Provides REST API endpoints for memory operations and serves
 the interactive visualization interface.
 """
-import asyncpg
 import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -58,146 +57,34 @@ class BatchPutRequest(BaseModel):
     upsert: bool = False
 
 
-async def get_graph_data():
-    """Fetch graph data from database."""
-    conn = await asyncpg.connect(
-        os.getenv('DATABASE_URL'),
-        statement_cache_size=0  # Disable statement caching for pgbouncer compatibility
-    )
+class ThinkRequest(BaseModel):
+    """Request model for think endpoint."""
+    query: str
+    agent_id: str = "default"
+    thinking_budget: int = 50
+    top_k: int = 10
 
-    # Get all memory units
-    units = await conn.fetch("""
-        SELECT id, text, event_date, context
-        FROM memory_units
-        ORDER BY event_date
-    """)
 
-    # Get all links with weights
-    links = await conn.fetch("""
-        SELECT
-            ml.from_unit_id,
-            ml.to_unit_id,
-            ml.link_type,
-            ml.weight,
-            e.canonical_name as entity_name
-        FROM memory_links ml
-        LEFT JOIN entities e ON ml.entity_id = e.id
-        ORDER BY ml.link_type, ml.weight DESC
-    """)
+class ThinkResponse(BaseModel):
+    """Response model for think endpoint."""
+    text: str
+    based_on: Dict[str, List[Dict[str, Any]]]  # {"world": [...], "agent": [...], "opinion": [...]}
+    new_opinions: List[str] = []  # List of newly formed opinions
 
-    # Get entity information
-    unit_entities = await conn.fetch("""
-        SELECT ue.unit_id, e.canonical_name, e.entity_type
-        FROM unit_entities ue
-        JOIN entities e ON ue.entity_id = e.id
-        ORDER BY ue.unit_id
-    """)
-
-    await conn.close()
-
-    # Build entity mapping
-    entity_map = {}
-    for row in unit_entities:
-        unit_id = row['unit_id']
-        entity_name = row['canonical_name']
-        entity_type = row['entity_type']
-        if unit_id not in entity_map:
-            entity_map[unit_id] = []
-        entity_map[unit_id].append(f"{entity_name} ({entity_type})")
-
-    # Build nodes
-    nodes = []
-    for row in units:
-        unit_id = row['id']
-        text = row['text']
-        event_date = row['event_date']
-        context = row['context']
-
-        entities = entity_map.get(unit_id, [])
-        entity_count = len(entities)
-
-        # Color by entity count
-        if entity_count == 0:
-            color = "#e0e0e0"
-        elif entity_count == 1:
-            color = "#90caf9"
-        else:
-            color = "#42a5f5"
-
-        nodes.append({
-            "data": {
-                "id": str(unit_id),
-                "label": text[:50] + "..." if len(text) > 50 else text,
-                "text": text,
-                "context": context,
-                "date": str(event_date.date()),
-                "entities": ", ".join(entities) if entities else "None",
-                "color": color
-            }
-        })
-
-    # Build edges
-    edges = []
-    for row in links:
-        from_id = row['from_unit_id']
-        to_id = row['to_unit_id']
-        link_type = row['link_type']
-        weight = row['weight']
-        entity_name = row['entity_name']
-
-        # Set color based on link type
-        if link_type == 'temporal':
-            color = "#00bcd4"
-            line_style = "dashed"
-        elif link_type == 'semantic':
-            color = "#ff69b4"
-            line_style = "solid"
-        elif link_type == 'entity':
-            color = "#ffd700"
-            line_style = "solid"
-        else:
-            color = "#999999"
-            line_style = "solid"
-
-        edges.append({
-            "data": {
-                "id": f"{from_id}-{to_id}-{link_type}",
-                "source": str(from_id),
-                "target": str(to_id),
-                "weight": weight,
-                "linkType": link_type,
-                "entityName": entity_name or "",
-                "color": color,
-                "lineStyle": line_style
-            }
-        })
-
-    # Build table rows
-    table_rows = []
-    for row in units:
-        unit_id = row['id']
-        text = row['text']
-        event_date = row['event_date']
-        context = row['context']
-
-        entities = entity_map.get(unit_id, [])
-        entity_str = ", ".join(entities) if entities else "None"
-        table_rows.append({
-            "id": str(unit_id)[:8] + "...",
-            "text": text,
-            "context": context,
-            "date": str(event_date.date()),
-            "entities": entity_str
-        })
-
-    return {
-        "nodes": nodes,
-        "edges": edges,
-        "table_rows": table_rows,
-        "total_units": len(units)
-    }
 
 memory = TemporalSemanticMemory()
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize memory system on startup."""
+    await memory.initialize()
+    logging.info("Memory system initialized")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup memory system on shutdown."""
+    await memory.close()
+    logging.info("Memory system closed")
 
 @app.get("/")
 async def index():
@@ -206,10 +93,10 @@ async def index():
 
 
 @app.get("/api/graph")
-async def api_graph():
-    """Get graph data from database."""
+async def api_graph(agent_id: Optional[str] = None, fact_type: Optional[str] = None):
+    """Get graph data from database, optionally filtered by agent_id and fact_type."""
     try:
-        data = await get_graph_data()
+        data = await memory.get_graph_data(agent_id, fact_type)
         return data
     except Exception as e:
         import traceback
@@ -247,26 +134,133 @@ async def api_search(request: SearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/world_search")
+async def api_world_search(request: SearchRequest):
+    """Search only world facts (general knowledge about the world)."""
+    try:
+        # Run search with fact_type filter for 'world'
+        results, trace = await memory.search_async(
+            agent_id=request.agent_id,
+            query=request.query,
+            thinking_budget=request.thinking_budget,
+            top_k=request.top_k,
+            enable_trace=request.trace,
+            mmr_lambda=request.mmr_lambda,
+            fact_type='world'
+        )
+
+        # Convert trace to dict
+        trace_dict = trace.to_dict() if trace else None
+
+        return {
+            'results': results,
+            'trace': trace_dict
+        }
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        print(f"Error in /api/world_search: {error_detail}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/agent_search")
+async def api_agent_search(request: SearchRequest):
+    """Search only agent facts (facts about what the agent did)."""
+    try:
+        # Run search with fact_type filter for 'agent'
+        results, trace = await memory.search_async(
+            agent_id=request.agent_id,
+            query=request.query,
+            thinking_budget=request.thinking_budget,
+            top_k=request.top_k,
+            enable_trace=request.trace,
+            mmr_lambda=request.mmr_lambda,
+            fact_type='agent'
+        )
+
+        # Convert trace to dict
+        trace_dict = trace.to_dict() if trace else None
+
+        return {
+            'results': results,
+            'trace': trace_dict
+        }
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        print(f"Error in /api/agent_search: {error_detail}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/opinion_search")
+async def api_opinion_search(request: SearchRequest):
+    """Search only opinion facts (agent's formed opinions and perspectives)."""
+    try:
+        # Run search with fact_type filter for 'opinion'
+        results, trace = await memory.search_async(
+            agent_id=request.agent_id,
+            query=request.query,
+            thinking_budget=request.thinking_budget,
+            top_k=request.top_k,
+            enable_trace=request.trace,
+            mmr_lambda=request.mmr_lambda,
+            fact_type='opinion'
+        )
+
+        # Convert trace to dict
+        trace_dict = trace.to_dict() if trace else None
+
+        return {
+            'results': results,
+            'trace': trace_dict
+        }
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        print(f"Error in /api/opinion_search: {error_detail}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/think")
+async def api_think(request: ThinkRequest):
+    """
+    Think and formulate an answer using agent identity, world facts, and opinions.
+
+    This endpoint:
+    1. Retrieves agent facts (agent's identity)
+    2. Retrieves world facts relevant to the query
+    3. Retrieves existing opinions (agent's perspectives)
+    4. Uses Groq LLM to formulate an answer
+    5. Extracts and stores any new opinions formed
+    6. Returns plain text answer, the facts used, and new opinions
+    """
+    try:
+        # Use the memory system's think_async method
+        result = await memory.think_async(
+            agent_id=request.agent_id,
+            query=request.query,
+            thinking_budget=request.thinking_budget,
+            top_k=request.top_k
+        )
+
+        return ThinkResponse(
+            text=result["text"],
+            based_on=result["based_on"],
+            new_opinions=result.get("new_opinions", [])
+        )
+
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+        print(f"Error in /api/think: {error_detail}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/agents")
 async def api_agents():
     """Get list of available agents from database."""
     try:
-        conn = await asyncpg.connect(
-            os.getenv('DATABASE_URL'),
-            statement_cache_size=0
-        )
-
-        # Get distinct agent IDs from memory_units
-        agents = await conn.fetch("""
-            SELECT DISTINCT agent_id
-            FROM memory_units
-            WHERE agent_id IS NOT NULL
-            ORDER BY agent_id
-        """)
-
-        await conn.close()
-
-        agent_list = [row['agent_id'] for row in agents]
+        agent_list = await memory.list_agents()
         return {"agents": agent_list}
     except Exception as e:
         import traceback
@@ -324,8 +318,6 @@ async def api_batch_put(request: BatchPutRequest):
             document_metadata=request.document_metadata,
             upsert=request.upsert
         )
-
-        await memory.close()
 
         return {
             "success": True,

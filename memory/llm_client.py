@@ -31,6 +31,9 @@ class ExtractedFact(BaseModel):
     date: str = Field(
         description="Absolute date/time when this fact occurred in ISO format (YYYY-MM-DDTHH:MM:SSZ). If text mentions relative time (yesterday, last week, this morning), calculate absolute date from the provided context date."
     )
+    fact_type: Literal["world", "agent", "opinion"] = Field(
+        description="Type of fact: 'world' for general facts about the world (events, people, things that happen), 'agent' for facts about what the AI agent specifically did or actions the agent took (conversations with the user, tasks performed by the agent), 'opinion' for the agent's formed opinions and perspectives"
+    )
     entities: List[Entity] = Field(
         default_factory=list,
         description="List of important entities mentioned in this fact with their types"
@@ -212,6 +215,21 @@ Examples of date extraction:
 - Pure reactions without content ("wow", "cool", "nice")
 - Incomplete thoughts or sentence fragments with no meaning
 
+## FACT TYPE CLASSIFICATION (CRITICAL):
+For EACH fact, classify it as either 'world' or 'agent':
+
+- **'world'**: General facts about the world, events, people, things that happen
+  - Examples: "Alice works at Google", "Bob went hiking in Yosemite", "The meeting is scheduled for Monday"
+  - Most facts will be 'world' type
+
+- **'agent'**: Facts specifically about what the AI agent did or actions the agent took
+  - Examples: "The AI agent helped the user debug their code", "The agent answered a question about Python", "The agent created a new file"
+  - ONLY use 'agent' if the fact is explicitly about the AI agent's actions
+  - Conversations with the user where the agent participated are 'agent' type
+  - Tasks performed BY the agent are 'agent' type
+
+When in doubt, classify as 'world'.
+
 ## ENTITY EXTRACTION (CRITICAL):
 For EACH fact, extract ALL important entities mentioned with their types:
 - **PERSON**: Names of individuals (Alice, Bob, Dr. Smith)
@@ -232,6 +250,7 @@ Entity extraction rules:
 
 Input: "Alice mentioned she works at Google in Mountain View. She joined the AI team last year."
 GOOD fact: "Alice works at Google in Mountain View on the AI team, which she joined last year"
+GOOD fact_type: "world"
 GOOD date: Calculate based on reference date (if reference is 2024-03-20, "last year" = 2023-03-20)
 GOOD entities: [
   {{"text": "Alice", "type": "PERSON"}},
@@ -242,6 +261,7 @@ GOOD entities: [
 
 Input: "Yesterday Bob went hiking in Yosemite because it helps him clear his mind."
 GOOD fact: "Bob went hiking in Yosemite because it helps him clear his mind"
+GOOD fact_type: "world"
 GOOD date: Reference date minus 1 day
 GOOD entities: [
   {{"text": "Bob", "type": "PERSON"}},
@@ -256,9 +276,19 @@ NOTE: Extract the event (photo taken/shared with friends at beach), NOT just tha
 
 Input: "I sent you that article about AI last Tuesday."
 GOOD fact: "Someone sent an article about AI"
+GOOD fact_type: "world"
 GOOD date: Calculate last Tuesday from reference date
 GOOD entities: [
   {{"text": "AI", "type": "CONCEPT"}}
+]
+
+Input: "The AI agent helped me write a Python script to analyze my data."
+GOOD fact: "The AI agent helped someone write a Python script to analyze their data"
+GOOD fact_type: "agent"
+GOOD date: Reference date (no specific time mentioned)
+GOOD entities: [
+  {{"text": "Python", "type": "PRODUCT"}},
+  {{"text": "data analysis", "type": "CONCEPT"}}
 ]
 
 Input: "I bought an Apple laptop and some apples from the store."
@@ -307,10 +337,17 @@ Remember:
 5. **Extract biographical details as SEPARATE facts** - "my home country Sweden" should create a fact "Person is from Sweden"
 6. Include ALL details, names, numbers, reasons, and context in the fact text
 7. Extract the absolute date for EACH fact by calculating relative times from the reference date
-8. Extract ALL entities with their types (PERSON, ORG, PLACE, PRODUCT, CONCEPT) for each fact
-9. Use types to disambiguate entities (Apple the company = ORG, apple the fruit = PRODUCT)
-10. When in doubt, EXTRACT IT - better to have too many facts than miss important events"""
+8. **CLASSIFY EACH FACT**: 'world' for general facts, 'agent' for AI agent actions
+9. Extract ALL entities with their types (PERSON, ORG, PLACE, PRODUCT, CONCEPT) for each fact
+10. Use types to disambiguate entities (Apple the company = ORG, apple the fruit = PRODUCT)
+11. When in doubt, EXTRACT IT - better to have too many facts than miss important events"""
 
+    import time
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    llm_call_start = time.time()
     response = await client.beta.chat.completions.parse(
         model=model,
         messages=[
@@ -328,12 +365,15 @@ Remember:
         response_format=FactExtractionResponse,
         extra_body={"service_tier": "auto"},
     )
+    llm_call_time = time.time() - llm_call_start
 
     # Extract the parsed response
     extraction_response = response.choices[0].message.parsed
 
     # Convert to dict format
     chunk_facts = [fact.model_dump() for fact in extraction_response.facts]
+
+    logger.info(f"          [1.3.{chunk_index + 1}] Chunk {chunk_index + 1}/{total_chunks} LLM call: {len(chunk_facts)} facts from {len(chunk)} chars in {llm_call_time:.3f}s")
 
     return chunk_facts
 
@@ -365,12 +405,21 @@ async def extract_facts_from_text(
     Returns:
         List of fact dictionaries with 'fact' and 'date' keys
     """
+    import time
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     client = get_llm_client()
 
     # Chunk text if necessary
+    chunk_start = time.time()
     chunks = chunk_text(text, max_chars=chunk_size)
+    chunk_time = time.time() - chunk_start
+    logger.info(f"        [1.1] Text chunking: {len(chunks)} chunks from {len(text)} chars in {chunk_time:.3f}s")
 
     # Process all chunks in parallel using asyncio.gather
+    task_creation_start = time.time()
     tasks = [
         _extract_facts_from_chunk(
             chunk=chunk,
@@ -385,13 +434,20 @@ async def extract_facts_from_text(
         )
         for i, chunk in enumerate(chunks)
     ]
+    logger.info(f"        [1.2] Task creation: {len(tasks)} tasks in {time.time() - task_creation_start:.3f}s")
 
     # Wait for all chunks to complete in parallel
+    llm_start = time.time()
     chunk_results = await asyncio.gather(*tasks)
+    llm_time = time.time() - llm_start
+    logger.info(f"        [1.3] LLM extraction (parallel): {len(chunks)} chunks in {llm_time:.3f}s")
 
     # Flatten results from all chunks
+    flatten_start = time.time()
     all_facts = []
     for chunk_facts in chunk_results:
         all_facts.extend(chunk_facts)
+    flatten_time = time.time() - flatten_start
+    logger.info(f"        [1.4] Result flattening: {len(all_facts)} facts in {flatten_time:.3f}s")
 
     return all_facts

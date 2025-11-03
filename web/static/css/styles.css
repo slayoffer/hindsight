@@ -5,6 +5,52 @@ body {
     background: #f5f5f5;
 }
 
+/* Breadcrumb */
+.breadcrumb-container {
+    background: #333;
+    color: white;
+    padding: 12px 20px;
+    border-bottom: 3px solid #42a5f5;
+}
+
+.breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+}
+
+.breadcrumb-item {
+    font-weight: 500;
+}
+
+.breadcrumb-separator {
+    color: #999;
+    font-weight: bold;
+}
+
+.agent-selector {
+    padding: 6px 12px;
+    border: 2px solid #42a5f5;
+    border-radius: 4px;
+    background: white;
+    color: #333;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.agent-selector:hover {
+    background: #e3f2fd;
+    border-color: #1e88e5;
+}
+
+.agent-selector:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(66, 165, 245, 0.3);
+}
+
 .tab-container {
     background: white;
 }
@@ -51,6 +97,192 @@ body {
     display: block;
 }
 
+/* Data Tab Styles */
+.data-sub-tabs {
+    background: #e3f2fd;
+    padding: 10px 20px;
+    border-bottom: 2px solid #333;
+    display: flex;
+    gap: 10px;
+}
+
+.data-sub-tab-button {
+    background: #fff;
+    border: 2px solid #42a5f5;
+    padding: 8px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.data-sub-tab-button:hover {
+    background: #e3f2fd;
+}
+
+.data-sub-tab-button.active {
+    background: #42a5f5;
+    color: white;
+}
+
+.data-subtab-content {
+    display: none;
+}
+
+.data-subtab-content.active {
+    display: block;
+}
+
+.view-toggle {
+    background: #f9f9f9;
+    padding: 10px 20px;
+    border-bottom: 2px solid #ddd;
+    display: flex;
+    gap: 10px;
+}
+
+.view-toggle-button {
+    background: #fff;
+    border: 2px solid #ccc;
+    padding: 6px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.view-toggle-button:hover {
+    background: #e0e0e0;
+}
+
+.view-toggle-button.active {
+    background: #333;
+    color: white;
+    border-color: #333;
+}
+
+.no-agent-message {
+    padding: 40px;
+    text-align: center;
+    color: #666;
+    background: #f9f9f9;
+}
+
+.data-view {
+    position: relative;
+}
+
+.data-controls {
+    padding: 15px;
+    background: #f9f9f9;
+    border-bottom: 2px solid #333;
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.data-controls h2 {
+    margin: 0;
+    flex: 1 0 100%;
+}
+
+.load-button {
+    padding: 8px 20px;
+    background: #66bb6a;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.load-button:hover {
+    background: #43a047;
+}
+
+.control-input {
+    width: 80px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.control-select {
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+.apply-button {
+    padding: 6px 15px;
+    background: #42a5f5;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.apply-button:hover {
+    background: #1e88e5;
+}
+
+.node-count {
+    color: #666;
+    font-size: 14px;
+}
+
+.graph-canvas {
+    width: 100%;
+    height: 800px;
+    background: #ffffff;
+}
+
+.table-filter {
+    width: 100%;
+    max-width: 600px;
+    padding: 10px;
+    margin: 0 20px 15px 20px;
+    border: 2px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.table-container {
+    overflow-x: auto;
+    padding: 0 20px 20px 20px;
+}
+
+.memory-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    max-width: 1400px;
+}
+
+.memory-table th {
+    padding: 10px;
+    text-align: left;
+    border: 1px solid #ddd;
+    background: #f0f0f0;
+}
+
+.memory-table td {
+    padding: 8px;
+    border: 1px solid #ddd;
+}
+
+.empty-message {
+    padding: 40px;
+    text-align: center;
+    color: #666;
+}
+
 #cy {
     width: 100%;
     height: 800px;
@@ -84,6 +316,10 @@ body {
     padding-bottom: 5px;
 }
 
+.legend h4 {
+    margin: 10px 0 5px 0;
+}
+
 .legend-item {
     margin: 8px 0;
     display: flex;
@@ -96,6 +332,19 @@ body {
     margin-right: 10px;
 }
 
+.legend-line.temporal {
+    background: #00bcd4;
+    border-top: 1px dashed #00bcd4;
+}
+
+.legend-line.semantic {
+    background: #ff69b4;
+}
+
+.legend-line.entity {
+    background: #ffd700;
+}
+
 .legend-node {
     width: 20px;
     height: 20px;
@@ -104,35 +353,18 @@ body {
     border-radius: 3px;
 }
 
-#table-filter {
-    width: 100%;
-    max-width: 600px;
-    padding: 10px;
-    margin-bottom: 15px;
-    border: 2px solid #ccc;
-    border-radius: 4px;
-    font-size: 14px;
-    box-sizing: border-box;
+.legend-node.no-entities {
+    background: #e0e0e0;
 }
 
-#memory-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    max-width: 1400px;
+.legend-node.one-entity {
+    background: #90caf9;
 }
 
-#memory-table th {
-    padding: 10px;
-    text-align: left;
-    border: 1px solid #ddd;
-    background: #f0f0f0;
+.legend-node.multi-entities {
+    background: #42a5f5;
 }
 
-#memory-table td {
-    padding: 8px;
-    border: 1px solid #ddd;
-}
 
 .tooltip {
     position: absolute;
@@ -495,4 +727,34 @@ body {
     z-index: 1000;
     max-width: 320px;
     font-size: 12px;
+}
+
+/* Think Tab Styles */
+#think-tab {
+    padding: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.think-controls {
+    background: #f9f9f9;
+    padding: 20px;
+    border-radius: 8px;
+    border: 2px solid #333;
+}
+
+.think-answer {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    border: 2px solid #333;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.think-sources {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    border: 2px solid #333;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
