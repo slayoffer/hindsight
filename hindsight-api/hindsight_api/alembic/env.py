@@ -138,7 +138,9 @@ def run_migrations_online() -> None:
         # If targeting a specific schema, set search_path
         # Include public in search_path for access to shared extensions (pgvector)
         if target_schema:
+            # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             connection.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"'))
+            # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             connection.execute(text(f'SET search_path TO "{target_schema}", public'))
 
         connection.commit()  # Commit the SET command

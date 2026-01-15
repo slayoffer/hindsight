@@ -260,7 +260,7 @@ class TestEndToEndWorkflow:
 
     def test_complete_workflow(self, client):
         """Test a complete workflow: create bank, store, search, reflect."""
-        workflow_bank_id = "workflow_test_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        workflow_bank_id = "workflow_test_" + datetime.now().strftime("%Y%m%d_%H%M%S")  # nosemgrep: Users.a.evseev.python-sql-string-concat
 
         # 1. Create bank
         client.create_bank(

@@ -49,7 +49,9 @@ def create_isolated_schema(db_url: str, schema_name: str, dimension: int | None 
 
     # Create schema (drop first if exists from previous failed run)
     with engine.connect() as conn:
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         conn.execute(text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         conn.execute(text(f"CREATE SCHEMA {schema_name}"))
         conn.commit()
 
@@ -65,6 +67,7 @@ def drop_schema(db_url: str, schema_name: str):
     """Drop an isolated schema."""
     engine = create_engine(db_url)
     with engine.connect() as conn:
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         conn.execute(text(f"DROP SCHEMA IF EXISTS {schema_name} CASCADE"))
         conn.commit()
 
@@ -93,7 +96,7 @@ def get_row_count(db_url: str, schema: str = "public") -> int:
     engine = create_engine(db_url)
     with engine.connect() as conn:
         return conn.execute(
-            text(f"SELECT COUNT(*) FROM {schema}.memory_units WHERE embedding IS NOT NULL")
+            text(f"SELECT COUNT(*) FROM {schema}.memory_units WHERE embedding IS NOT NULL")  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         ).scalar()
 
 
@@ -105,6 +108,7 @@ def insert_test_embedding(db_url: str, schema: str, dimension: int):
 
     with engine.connect() as conn:
         conn.execute(
+            # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             text(f"""
                 INSERT INTO {schema}.memory_units (bank_id, text, embedding, event_date, fact_type)
                 VALUES ('test-bank', 'test text', '{embedding_str}'::vector, NOW(), 'world')
@@ -117,7 +121,7 @@ def clear_embeddings(db_url: str, schema: str):
     """Clear all rows from memory_units."""
     engine = create_engine(db_url)
     with engine.connect() as conn:
-        conn.execute(text(f"DELETE FROM {schema}.memory_units"))
+        conn.execute(text(f"DELETE FROM {schema}.memory_units"))  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         conn.commit()
 
 

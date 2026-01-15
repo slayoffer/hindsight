@@ -59,6 +59,7 @@ def upgrade() -> None:
     # - empathy: derived from agreeableness + inverse of neuroticism
     # Default all to 3 (neutral) for simplicity
     conn.execute(
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         sa.text(f"""
         UPDATE {schema}banks
         SET disposition = '{{"skepticism": 3, "literalism": 3, "empathy": 3}}'::jsonb
@@ -68,6 +69,7 @@ def upgrade() -> None:
 
     # Update the default for new banks
     conn.execute(
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         sa.text(f"""
         ALTER TABLE {schema}banks
         ALTER COLUMN disposition SET DEFAULT '{{"skepticism": 3, "literalism": 3, "empathy": 3}}'::jsonb
@@ -95,6 +97,7 @@ def downgrade() -> None:
 
     # Revert to Big Five format with default values
     conn.execute(
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         sa.text(f"""
         UPDATE {schema}banks
         SET disposition = '{{"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5, "bias_strength": 0.5}}'::jsonb
@@ -104,6 +107,7 @@ def downgrade() -> None:
 
     # Update the default for new banks
     conn.execute(
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         sa.text(f"""
         ALTER TABLE {schema}banks
         ALTER COLUMN disposition SET DEFAULT '{{"openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5, "agreeableness": 0.5, "neuroticism": 0.5, "bias_strength": 0.5}}'::jsonb

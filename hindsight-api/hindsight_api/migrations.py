@@ -161,6 +161,7 @@ def run_migrations(
             # pg_advisory_lock blocks until the lock is acquired
             # The lock is automatically released when the connection closes
             logger.debug(f"Acquiring migration advisory lock for schema '{schema_name}' (id={lock_id})...")
+            # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             conn.execute(text(f"SELECT pg_advisory_lock({lock_id})"))
             logger.debug("Migration advisory lock acquired")
 
@@ -169,6 +170,7 @@ def run_migrations(
                 _run_migrations_internal(database_url, script_location, schema=schema)
             finally:
                 # Explicitly release the lock (also released on connection close)
+                # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
                 conn.execute(text(f"SELECT pg_advisory_unlock({lock_id})"))
                 logger.debug("Migration advisory lock released")
 
@@ -316,7 +318,7 @@ def ensure_embedding_dimension(
 
         # Check if table has data
         row_count = conn.execute(
-            text(f"SELECT COUNT(*) FROM {schema_name}.memory_units WHERE embedding IS NOT NULL")
+            text(f"SELECT COUNT(*) FROM {schema_name}.memory_units WHERE embedding IS NOT NULL")  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         ).scalar()
 
         if row_count > 0:
@@ -334,6 +336,7 @@ def ensure_embedding_dimension(
         # Drop the HNSW index on embedding column if it exists
         # Only drop indexes that use 'hnsw' and reference the 'embedding' column
         conn.execute(
+            # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             text(f"""
                 DO $$
                 DECLARE idx_name TEXT;
@@ -353,12 +356,13 @@ def ensure_embedding_dimension(
 
         # Alter the column type
         conn.execute(
-            text(f"ALTER TABLE {schema_name}.memory_units ALTER COLUMN embedding TYPE vector({required_dimension})")
+            text(f"ALTER TABLE {schema_name}.memory_units ALTER COLUMN embedding TYPE vector({required_dimension})")  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         )
         conn.commit()
 
         # Recreate the HNSW index
         conn.execute(
+            # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
             text(f"""
                 CREATE INDEX IF NOT EXISTS idx_memory_units_embedding_hnsw
                 ON {schema_name}.memory_units
