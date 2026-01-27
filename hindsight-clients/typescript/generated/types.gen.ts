@@ -7,7 +7,7 @@ export type ClientOptions = {
 /**
  * AddBackgroundRequest
  *
- * Request model for adding/merging background information.
+ * Request model for adding/merging background information. Deprecated: use SetMissionRequest instead.
  */
 export type AddBackgroundRequest = {
   /**
@@ -19,21 +19,43 @@ export type AddBackgroundRequest = {
   /**
    * Update Disposition
    *
-   * If true, infer disposition traits from the merged background (default: true)
+   * Deprecated - disposition is no longer auto-inferred from mission
    */
   update_disposition?: boolean;
 };
 
 /**
+ * AsyncOperationSubmitResponse
+ *
+ * Response model for submitting an async operation.
+ */
+export type AsyncOperationSubmitResponse = {
+  /**
+   * Operation Id
+   */
+  operation_id: string;
+  /**
+   * Status
+   */
+  status: string;
+};
+
+/**
  * BackgroundResponse
  *
- * Response model for background update.
+ * Response model for background update. Deprecated: use MissionResponse instead.
  */
 export type BackgroundResponse = {
   /**
-   * Background
+   * Mission
    */
-  background: string;
+  mission: string;
+  /**
+   * Background
+   *
+   * Deprecated: same as mission
+   */
+  background?: string | null;
   disposition?: DispositionTraits | null;
 };
 
@@ -53,9 +75,9 @@ export type BankListItem = {
   name?: string | null;
   disposition: DispositionTraits;
   /**
-   * Background
+   * Mission
    */
-  background?: string | null;
+  mission?: string | null;
   /**
    * Created At
    */
@@ -94,9 +116,17 @@ export type BankProfileResponse = {
   name: string;
   disposition: DispositionTraits;
   /**
-   * Background
+   * Mission
+   *
+   * The agent's mission - who they are and what they're trying to accomplish
    */
-  background: string;
+  mission: string;
+  /**
+   * Background
+   *
+   * Deprecated: use mission instead
+   */
+  background?: string | null;
 };
 
 /**
@@ -155,6 +185,24 @@ export type BankStatsResponse = {
    * Failed Operations
    */
   failed_operations: number;
+  /**
+   * Last Consolidated At
+   *
+   * When consolidation last ran (ISO format)
+   */
+  last_consolidated_at?: string | null;
+  /**
+   * Pending Consolidation
+   *
+   * Number of memories not yet processed into mental models
+   */
+  pending_consolidation?: number;
+  /**
+   * Total Mental Models
+   *
+   * Total number of mental models
+   */
+  total_mental_models?: number;
 };
 
 /**
@@ -257,6 +305,26 @@ export type ChunkResponse = {
 };
 
 /**
+ * ConsolidationResponse
+ *
+ * Response model for consolidation trigger endpoint.
+ */
+export type ConsolidationResponse = {
+  /**
+   * Operation Id
+   *
+   * ID of the async consolidation operation
+   */
+  operation_id: string;
+  /**
+   * Deduplicated
+   *
+   * True if an existing pending task was reused
+   */
+  deduplicated?: boolean;
+};
+
+/**
  * CreateBankRequest
  *
  * Request model for creating/updating a bank.
@@ -268,9 +336,101 @@ export type CreateBankRequest = {
   name?: string | null;
   disposition?: DispositionTraits | null;
   /**
+   * Mission
+   *
+   * The agent's mission
+   */
+  mission?: string | null;
+  /**
    * Background
+   *
+   * Deprecated: use mission instead
    */
   background?: string | null;
+};
+
+/**
+ * CreateDirectiveRequest
+ *
+ * Request model for creating a directive.
+ */
+export type CreateDirectiveRequest = {
+  /**
+   * Name
+   *
+   * Human-readable name for the directive
+   */
+  name: string;
+  /**
+   * Content
+   *
+   * The directive text to inject into prompts
+   */
+  content: string;
+  /**
+   * Priority
+   *
+   * Higher priority directives are injected first
+   */
+  priority?: number;
+  /**
+   * Is Active
+   *
+   * Whether this directive is active
+   */
+  is_active?: boolean;
+  /**
+   * Tags
+   *
+   * Tags for filtering
+   */
+  tags?: Array<string>;
+};
+
+/**
+ * CreateReflectionRequest
+ *
+ * Request model for creating a reflection.
+ */
+export type CreateReflectionRequest = {
+  /**
+   * Name
+   *
+   * Human-readable name for the reflection
+   */
+  name: string;
+  /**
+   * Source Query
+   *
+   * The query to run to generate content
+   */
+  source_query: string;
+  /**
+   * Tags
+   *
+   * Tags for scoped visibility
+   */
+  tags?: Array<string>;
+  /**
+   * Max Tokens
+   *
+   * Maximum tokens for generated content
+   */
+  max_tokens?: number;
+};
+
+/**
+ * CreateReflectionResponse
+ *
+ * Response model for reflection creation.
+ */
+export type CreateReflectionResponse = {
+  /**
+   * Operation Id
+   *
+   * Operation ID to track progress
+   */
+  operation_id: string;
 };
 
 /**
@@ -315,6 +475,62 @@ export type DeleteResponse = {
    * Deleted Count
    */
   deleted_count?: number | null;
+};
+
+/**
+ * DirectiveListResponse
+ *
+ * Response model for listing directives.
+ */
+export type DirectiveListResponse = {
+  /**
+   * Items
+   */
+  items: Array<DirectiveResponse>;
+};
+
+/**
+ * DirectiveResponse
+ *
+ * Response model for a directive.
+ */
+export type DirectiveResponse = {
+  /**
+   * Id
+   */
+  id: string;
+  /**
+   * Bank Id
+   */
+  bank_id: string;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Content
+   */
+  content: string;
+  /**
+   * Priority
+   */
+  priority?: number;
+  /**
+   * Is Active
+   */
+  is_active?: boolean;
+  /**
+   * Tags
+   */
+  tags?: Array<string>;
+  /**
+   * Created At
+   */
+  created_at?: string | null;
+  /**
+   * Updated At
+   */
+  updated_at?: string | null;
 };
 
 /**
@@ -561,6 +777,32 @@ export type FactsIncludeOptions = {
 };
 
 /**
+ * FeaturesInfo
+ *
+ * Feature flags indicating which capabilities are enabled.
+ */
+export type FeaturesInfo = {
+  /**
+   * Mental Models
+   *
+   * Whether mental models (auto-consolidation) are enabled
+   */
+  mental_models: boolean;
+  /**
+   * Mcp
+   *
+   * Whether MCP (Model Context Protocol) server is enabled
+   */
+  mcp: boolean;
+  /**
+   * Worker
+   *
+   * Whether the background worker is enabled
+   */
+  worker: boolean;
+};
+
+/**
  * GraphDataResponse
  *
  * Response model for graph data endpoint.
@@ -761,7 +1003,7 @@ export type OperationResponse = {
   /**
    * Document Id
    */
-  document_id: string | null;
+  document_id?: string | null;
   /**
    * Created At
    */
@@ -777,6 +1019,42 @@ export type OperationResponse = {
 };
 
 /**
+ * OperationStatusResponse
+ *
+ * Response model for getting a single operation status.
+ */
+export type OperationStatusResponse = {
+  /**
+   * Operation Id
+   */
+  operation_id: string;
+  /**
+   * Status
+   */
+  status: "pending" | "completed" | "failed" | "not_found";
+  /**
+   * Operation Type
+   */
+  operation_type?: string | null;
+  /**
+   * Created At
+   */
+  created_at?: string | null;
+  /**
+   * Updated At
+   */
+  updated_at?: string | null;
+  /**
+   * Completed At
+   */
+  completed_at?: string | null;
+  /**
+   * Error Message
+   */
+  error_message?: string | null;
+};
+
+/**
  * OperationsListResponse
  *
  * Response model for list operations endpoint.
@@ -786,6 +1064,18 @@ export type OperationsListResponse = {
    * Bank Id
    */
   bank_id: string;
+  /**
+   * Total
+   */
+  total: number;
+  /**
+   * Limit
+   */
+  limit: number;
+  /**
+   * Offset
+   */
+  offset: number;
   /**
    * Operations
    */
@@ -805,7 +1095,7 @@ export type RecallRequest = {
   /**
    * Types
    *
-   * List of fact types to recall (defaults to all if not specified)
+   * List of fact types to recall: 'world', 'experience', 'mental_model'. Defaults to world and experience if not specified. Note: 'opinion' is accepted but ignored (opinions are excluded from recall).
    */
   types?: Array<string> | null;
   budget?: Budget;
@@ -934,6 +1224,20 @@ export type RecallResult = {
 };
 
 /**
+ * ReflectBasedOn
+ *
+ * Evidence the response is based on: memories and mental models.
+ */
+export type ReflectBasedOn = {
+  /**
+   * Memories
+   *
+   * Memory facts used to generate the response
+   */
+  memories?: Array<ReflectFact>;
+};
+
+/**
  * ReflectFact
  *
  * A fact used in think response.
@@ -975,6 +1279,68 @@ export type ReflectIncludeOptions = {
    * Include facts that the answer is based on. Set to {} to enable, null to disable (default: disabled).
    */
   facts?: FactsIncludeOptions | null;
+  /**
+   * Include tool calls trace. Set to {} for full trace (input+output), {output: false} for inputs only.
+   */
+  tool_calls?: ToolCallsIncludeOptions | null;
+};
+
+/**
+ * ReflectLLMCall
+ *
+ * An LLM call made during reflect agent execution.
+ */
+export type ReflectLlmCall = {
+  /**
+   * Scope
+   *
+   * Call scope: agent_1, agent_2, final, etc.
+   */
+  scope: string;
+  /**
+   * Duration Ms
+   *
+   * Execution time in milliseconds
+   */
+  duration_ms: number;
+};
+
+/**
+ * ReflectMentalModel
+ *
+ * A mental model accessed during reflect.
+ */
+export type ReflectMentalModel = {
+  /**
+   * Id
+   *
+   * Mental model ID
+   */
+  id: string;
+  /**
+   * Name
+   *
+   * Mental model name
+   */
+  name: string;
+  /**
+   * Type
+   *
+   * Mental model type: entity, concept, event
+   */
+  type: string;
+  /**
+   * Subtype
+   *
+   * Mental model subtype: structural, emergent, learned, directive
+   */
+  subtype: string;
+  /**
+   * Observations
+   *
+   * Observations for directive mental models (subtype='directive')
+   */
+  observations?: Array<string> | null;
 };
 
 /**
@@ -990,6 +1356,10 @@ export type ReflectRequest = {
   budget?: Budget;
   /**
    * Context
+   *
+   * DEPRECATED: Additional context is now concatenated with the query. Pass context directly in the query field instead. If provided, it will be appended to the query for backward compatibility.
+   *
+   * @deprecated
    */
   context?: string | null;
   /**
@@ -1035,9 +1405,9 @@ export type ReflectResponse = {
    */
   text: string;
   /**
-   * Based On
+   * Evidence used to generate the response. Only present when include.facts is set.
    */
-  based_on?: Array<ReflectFact>;
+  based_on?: ReflectBasedOn | null;
   /**
    * Structured Output
    *
@@ -1050,6 +1420,138 @@ export type ReflectResponse = {
    * Token usage metrics for LLM calls during reflection.
    */
   usage?: TokenUsage | null;
+  /**
+   * Execution trace of tool and LLM calls. Only present when include.tool_calls is set.
+   */
+  trace?: ReflectTrace | null;
+};
+
+/**
+ * ReflectToolCall
+ *
+ * A tool call made during reflect agent execution.
+ */
+export type ReflectToolCall = {
+  /**
+   * Tool
+   *
+   * Tool name: lookup, recall, learn, expand
+   */
+  tool: string;
+  /**
+   * Input
+   *
+   * Tool input parameters
+   */
+  input: {
+    [key: string]: unknown;
+  };
+  /**
+   * Output
+   *
+   * Tool output (only included when include.tool_calls.output is true)
+   */
+  output?: {
+    [key: string]: unknown;
+  } | null;
+  /**
+   * Duration Ms
+   *
+   * Execution time in milliseconds
+   */
+  duration_ms: number;
+  /**
+   * Iteration
+   *
+   * Iteration number (1-based) when this tool was called
+   */
+  iteration?: number;
+};
+
+/**
+ * ReflectTrace
+ *
+ * Execution trace of LLM and tool calls during reflection.
+ */
+export type ReflectTrace = {
+  /**
+   * Tool Calls
+   *
+   * Tool calls made during reflection
+   */
+  tool_calls?: Array<ReflectToolCall>;
+  /**
+   * Llm Calls
+   *
+   * LLM calls made during reflection
+   */
+  llm_calls?: Array<ReflectLlmCall>;
+  /**
+   * Mental Models
+   *
+   * Mental models used during reflection (includes directives with subtype='directive')
+   */
+  mental_models?: Array<ReflectMentalModel>;
+};
+
+/**
+ * ReflectionListResponse
+ *
+ * Response model for listing reflections.
+ */
+export type ReflectionListResponse = {
+  /**
+   * Items
+   */
+  items: Array<ReflectionResponse>;
+};
+
+/**
+ * ReflectionResponse
+ *
+ * Response model for a reflection.
+ */
+export type ReflectionResponse = {
+  /**
+   * Id
+   */
+  id: string;
+  /**
+   * Bank Id
+   */
+  bank_id: string;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Source Query
+   */
+  source_query: string;
+  /**
+   * Content
+   */
+  content: string;
+  /**
+   * Tags
+   */
+  tags?: Array<string>;
+  /**
+   * Last Refreshed At
+   */
+  last_refreshed_at?: string | null;
+  /**
+   * Created At
+   */
+  created_at?: string | null;
+  /**
+   * Reflect Response
+   *
+   * Full reflect API response payload including based_on facts and mental_models
+   */
+  reflect_response?: {
+    [key: string]: unknown;
+  } | null;
 };
 
 /**
@@ -1162,12 +1664,78 @@ export type TokenUsage = {
 };
 
 /**
+ * ToolCallsIncludeOptions
+ *
+ * Options for including tool calls in reflect results.
+ */
+export type ToolCallsIncludeOptions = {
+  /**
+   * Output
+   *
+   * Include tool outputs in the trace. Set to false to only include inputs (smaller payload).
+   */
+  output?: boolean;
+};
+
+/**
+ * UpdateDirectiveRequest
+ *
+ * Request model for updating a directive.
+ */
+export type UpdateDirectiveRequest = {
+  /**
+   * Name
+   *
+   * New name
+   */
+  name?: string | null;
+  /**
+   * Content
+   *
+   * New content
+   */
+  content?: string | null;
+  /**
+   * Priority
+   *
+   * New priority
+   */
+  priority?: number | null;
+  /**
+   * Is Active
+   *
+   * New active status
+   */
+  is_active?: boolean | null;
+  /**
+   * Tags
+   *
+   * New tags
+   */
+  tags?: Array<string> | null;
+};
+
+/**
  * UpdateDispositionRequest
  *
  * Request model for updating disposition traits.
  */
 export type UpdateDispositionRequest = {
   disposition: DispositionTraits;
+};
+
+/**
+ * UpdateReflectionRequest
+ *
+ * Request model for updating a reflection.
+ */
+export type UpdateReflectionRequest = {
+  /**
+   * Name
+   *
+   * New name for the reflection
+   */
+  name?: string | null;
 };
 
 /**
@@ -1188,6 +1756,24 @@ export type ValidationError = {
   type: string;
 };
 
+/**
+ * VersionResponse
+ *
+ * Response model for the version/info endpoint.
+ */
+export type VersionResponse = {
+  /**
+   * Api Version
+   *
+   * API version string
+   */
+  api_version: string;
+  /**
+   * Enabled feature flags
+   */
+  features: FeaturesInfo;
+};
+
 export type HealthEndpointHealthGetData = {
   body?: never;
   path?: never;
@@ -1201,6 +1787,22 @@ export type HealthEndpointHealthGetResponses = {
    */
   200: unknown;
 };
+
+export type GetVersionData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/version";
+};
+
+export type GetVersionResponses = {
+  /**
+   * Successful Response
+   */
+  200: VersionResponse;
+};
+
+export type GetVersionResponse = GetVersionResponses[keyof GetVersionResponses];
 
 export type MetricsEndpointMetricsGetData = {
   body?: never;
@@ -1627,6 +2229,492 @@ export type RegenerateEntityObservationsResponses = {
 export type RegenerateEntityObservationsResponse =
   RegenerateEntityObservationsResponses[keyof RegenerateEntityObservationsResponses];
 
+export type ListReflectionsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: {
+    /**
+     * Tags
+     *
+     * Filter by tags
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How to match tags
+     */
+    tags_match?: "any" | "all" | "exact";
+    /**
+     * Limit
+     */
+    limit?: number;
+    /**
+     * Offset
+     */
+    offset?: number;
+  };
+  url: "/v1/default/banks/{bank_id}/reflections";
+};
+
+export type ListReflectionsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListReflectionsError =
+  ListReflectionsErrors[keyof ListReflectionsErrors];
+
+export type ListReflectionsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ReflectionListResponse;
+};
+
+export type ListReflectionsResponse =
+  ListReflectionsResponses[keyof ListReflectionsResponses];
+
+export type CreateReflectionData = {
+  body: CreateReflectionRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/reflections";
+};
+
+export type CreateReflectionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CreateReflectionError =
+  CreateReflectionErrors[keyof CreateReflectionErrors];
+
+export type CreateReflectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: CreateReflectionResponse;
+};
+
+export type CreateReflectionResponse2 =
+  CreateReflectionResponses[keyof CreateReflectionResponses];
+
+export type DeleteReflectionData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Reflection Id
+     */
+    reflection_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/reflections/{reflection_id}";
+};
+
+export type DeleteReflectionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type DeleteReflectionError =
+  DeleteReflectionErrors[keyof DeleteReflectionErrors];
+
+export type DeleteReflectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
+export type GetReflectionData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Reflection Id
+     */
+    reflection_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/reflections/{reflection_id}";
+};
+
+export type GetReflectionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetReflectionError = GetReflectionErrors[keyof GetReflectionErrors];
+
+export type GetReflectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: ReflectionResponse;
+};
+
+export type GetReflectionResponse =
+  GetReflectionResponses[keyof GetReflectionResponses];
+
+export type UpdateReflectionData = {
+  body: UpdateReflectionRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Reflection Id
+     */
+    reflection_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/reflections/{reflection_id}";
+};
+
+export type UpdateReflectionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type UpdateReflectionError =
+  UpdateReflectionErrors[keyof UpdateReflectionErrors];
+
+export type UpdateReflectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: ReflectionResponse;
+};
+
+export type UpdateReflectionResponse =
+  UpdateReflectionResponses[keyof UpdateReflectionResponses];
+
+export type RefreshReflectionData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Reflection Id
+     */
+    reflection_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/reflections/{reflection_id}/refresh";
+};
+
+export type RefreshReflectionErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type RefreshReflectionError =
+  RefreshReflectionErrors[keyof RefreshReflectionErrors];
+
+export type RefreshReflectionResponses = {
+  /**
+   * Successful Response
+   */
+  200: AsyncOperationSubmitResponse;
+};
+
+export type RefreshReflectionResponse =
+  RefreshReflectionResponses[keyof RefreshReflectionResponses];
+
+export type ListDirectivesData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: {
+    /**
+     * Tags
+     *
+     * Filter by tags
+     */
+    tags?: Array<string> | null;
+    /**
+     * Tags Match
+     *
+     * How to match tags
+     */
+    tags_match?: "any" | "all" | "exact";
+    /**
+     * Active Only
+     *
+     * Only return active directives
+     */
+    active_only?: boolean;
+    /**
+     * Limit
+     */
+    limit?: number;
+    /**
+     * Offset
+     */
+    offset?: number;
+  };
+  url: "/v1/default/banks/{bank_id}/directives";
+};
+
+export type ListDirectivesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListDirectivesError =
+  ListDirectivesErrors[keyof ListDirectivesErrors];
+
+export type ListDirectivesResponses = {
+  /**
+   * Successful Response
+   */
+  200: DirectiveListResponse;
+};
+
+export type ListDirectivesResponse =
+  ListDirectivesResponses[keyof ListDirectivesResponses];
+
+export type CreateDirectiveData = {
+  body: CreateDirectiveRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/directives";
+};
+
+export type CreateDirectiveErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CreateDirectiveError =
+  CreateDirectiveErrors[keyof CreateDirectiveErrors];
+
+export type CreateDirectiveResponses = {
+  /**
+   * Successful Response
+   */
+  200: DirectiveResponse;
+};
+
+export type CreateDirectiveResponse =
+  CreateDirectiveResponses[keyof CreateDirectiveResponses];
+
+export type DeleteDirectiveData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Directive Id
+     */
+    directive_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/directives/{directive_id}";
+};
+
+export type DeleteDirectiveErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type DeleteDirectiveError =
+  DeleteDirectiveErrors[keyof DeleteDirectiveErrors];
+
+export type DeleteDirectiveResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
+export type GetDirectiveData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Directive Id
+     */
+    directive_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/directives/{directive_id}";
+};
+
+export type GetDirectiveErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetDirectiveError = GetDirectiveErrors[keyof GetDirectiveErrors];
+
+export type GetDirectiveResponses = {
+  /**
+   * Successful Response
+   */
+  200: DirectiveResponse;
+};
+
+export type GetDirectiveResponse =
+  GetDirectiveResponses[keyof GetDirectiveResponses];
+
+export type UpdateDirectiveData = {
+  body: UpdateDirectiveRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Directive Id
+     */
+    directive_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/directives/{directive_id}";
+};
+
+export type UpdateDirectiveErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type UpdateDirectiveError =
+  UpdateDirectiveErrors[keyof UpdateDirectiveErrors];
+
+export type UpdateDirectiveResponses = {
+  /**
+   * Successful Response
+   */
+  200: DirectiveResponse;
+};
+
+export type UpdateDirectiveResponse =
+  UpdateDirectiveResponses[keyof UpdateDirectiveResponses];
+
 export type ListDocumentsData = {
   body?: never;
   headers?: {
@@ -1865,7 +2953,26 @@ export type ListOperationsData = {
      */
     bank_id: string;
   };
-  query?: never;
+  query?: {
+    /**
+     * Status
+     *
+     * Filter by status: pending, completed, or failed
+     */
+    status?: string | null;
+    /**
+     * Limit
+     *
+     * Maximum number of operations to return
+     */
+    limit?: number;
+    /**
+     * Offset
+     *
+     * Number of operations to skip
+     */
+    offset?: number;
+  };
   url: "/v1/default/banks/{bank_id}/operations";
 };
 
@@ -1930,6 +3037,48 @@ export type CancelOperationResponses = {
 
 export type CancelOperationResponse2 =
   CancelOperationResponses[keyof CancelOperationResponses];
+
+export type GetOperationStatusData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+    /**
+     * Operation Id
+     */
+    operation_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/operations/{operation_id}";
+};
+
+export type GetOperationStatusErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetOperationStatusError =
+  GetOperationStatusErrors[keyof GetOperationStatusErrors];
+
+export type GetOperationStatusResponses = {
+  /**
+   * Successful Response
+   */
+  200: OperationStatusResponse;
+};
+
+export type GetOperationStatusResponse =
+  GetOperationStatusResponses[keyof GetOperationStatusResponses];
 
 export type GetBankProfileData = {
   body?: never;
@@ -2081,6 +3230,42 @@ export type DeleteBankResponses = {
 
 export type DeleteBankResponse = DeleteBankResponses[keyof DeleteBankResponses];
 
+export type UpdateBankData = {
+  body: CreateBankRequest;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}";
+};
+
+export type UpdateBankErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type UpdateBankError = UpdateBankErrors[keyof UpdateBankErrors];
+
+export type UpdateBankResponses = {
+  /**
+   * Successful Response
+   */
+  200: BankProfileResponse;
+};
+
+export type UpdateBankResponse = UpdateBankResponses[keyof UpdateBankResponses];
+
 export type CreateOrUpdateBankData = {
   body: CreateBankRequest;
   headers?: {
@@ -2118,6 +3303,82 @@ export type CreateOrUpdateBankResponses = {
 
 export type CreateOrUpdateBankResponse =
   CreateOrUpdateBankResponses[keyof CreateOrUpdateBankResponses];
+
+export type ClearMentalModelsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/mental-models";
+};
+
+export type ClearMentalModelsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ClearMentalModelsError =
+  ClearMentalModelsErrors[keyof ClearMentalModelsErrors];
+
+export type ClearMentalModelsResponses = {
+  /**
+   * Successful Response
+   */
+  200: DeleteResponse;
+};
+
+export type ClearMentalModelsResponse =
+  ClearMentalModelsResponses[keyof ClearMentalModelsResponses];
+
+export type TriggerConsolidationData = {
+  body?: never;
+  headers?: {
+    /**
+     * Authorization
+     */
+    authorization?: string | null;
+  };
+  path: {
+    /**
+     * Bank Id
+     */
+    bank_id: string;
+  };
+  query?: never;
+  url: "/v1/default/banks/{bank_id}/consolidate";
+};
+
+export type TriggerConsolidationErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type TriggerConsolidationError =
+  TriggerConsolidationErrors[keyof TriggerConsolidationErrors];
+
+export type TriggerConsolidationResponses = {
+  /**
+   * Successful Response
+   */
+  200: ConsolidationResponse;
+};
+
+export type TriggerConsolidationResponse =
+  TriggerConsolidationResponses[keyof TriggerConsolidationResponses];
 
 export type ClearBankMemoriesData = {
   body?: never;

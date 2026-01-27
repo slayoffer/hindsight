@@ -301,15 +301,6 @@ For advanced authentication (JWT, OAuth, multi-tenant schemas), implement a cust
 - **`mpfp`**: Multi-Path Fact Propagation - iterative graph traversal with activation spreading. More thorough but slower.
 - **`bfs`**: Breadth-first search from seed facts. Simple but less effective for large graphs.
 
-### Entity Observations
-
-Controls when the system generates entity observations (summaries about entities mentioned in retained content).
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `HINDSIGHT_API_OBSERVATION_MIN_FACTS` | Minimum facts about an entity before generating observations | `5` |
-| `HINDSIGHT_API_OBSERVATION_TOP_ENTITIES` | Max entities to process per retain batch | `5` |
-
 ### Retain
 
 Controls the retain (memory ingestion) pipeline.
@@ -320,7 +311,6 @@ Controls the retain (memory ingestion) pipeline.
 | `HINDSIGHT_API_RETAIN_CHUNK_SIZE` | Max characters per chunk for fact extraction. Larger chunks extract fewer LLM calls but may lose context. | `3000` |
 | `HINDSIGHT_API_RETAIN_EXTRACTION_MODE` | Fact extraction mode: `concise` (selective, fewer high-quality facts) or `verbose` (detailed, more facts) | `concise` |
 | `HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS` | Extract causal relationships between facts | `true` |
-| `HINDSIGHT_API_RETAIN_OBSERVATIONS_ASYNC` | Run entity observation generation asynchronously (after retain completes) | `false` |
 
 #### Extraction Modes
 
@@ -344,15 +334,18 @@ Configuration for the local MCP server (`hindsight-local-mcp` command).
 export HINDSIGHT_API_MCP_INSTRUCTIONS="Also store every action you take, including tool calls and decisions made."
 ```
 
-### Background Tasks
+### Distributed Workers
 
-Controls background task processing for async operations like opinion formation and entity observations.
+Configuration for background task processing. By default, the API processes tasks internally. For high-throughput deployments, run dedicated workers. See [Services - Worker Service](./services#worker-service) for details.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HINDSIGHT_API_TASK_BACKEND` | Task backend implementation: `memory` (in-process queue) or `noop` (discard tasks, useful for tests) | `memory` |
-| `HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_SIZE` | Max tasks to process in one batch (memory backend only) | `10` |
-| `HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_INTERVAL` | Interval between batch processing in seconds (memory backend only) | `1.0` |
+| `HINDSIGHT_API_WORKER_ENABLED` | Enable internal worker in API process | `true` |
+| `HINDSIGHT_API_WORKER_ID` | Unique worker identifier | hostname |
+| `HINDSIGHT_API_WORKER_POLL_INTERVAL_MS` | Database polling interval in milliseconds | `500` |
+| `HINDSIGHT_API_WORKER_BATCH_SIZE` | Tasks to claim per poll cycle | `10` |
+| `HINDSIGHT_API_WORKER_MAX_RETRIES` | Max retries before marking task failed | `3` |
+| `HINDSIGHT_API_WORKER_HTTP_PORT` | HTTP port for worker metrics/health (worker CLI only) | `8889` |
 
 ### Performance Optimization
 
