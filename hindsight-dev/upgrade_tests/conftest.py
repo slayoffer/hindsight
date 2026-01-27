@@ -65,7 +65,8 @@ def _clean_database(db_url: str):
             """)
         ).fetchall()
         for table in tables:
-            conn.execute(text(f'DROP TABLE IF EXISTS public."{table[0]}" CASCADE'))
+            # Table name from pg_tables system catalog, not user input
+            conn.execute(text(f'DROP TABLE IF EXISTS public."{table[0]}" CASCADE'))  # nosemgrep: avoid-sqlalchemy-text
         conn.commit()
     engine.dispose()
 

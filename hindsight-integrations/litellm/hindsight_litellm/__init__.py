@@ -433,7 +433,8 @@ def _inject_memories(
                 return messages
 
             results_count = len(memory_lines)
-            memory_context = (
+            # This is LLM prompt context, not SQL
+            memory_context = (  # nosemgrep: python-sql-string-concat
                 "# Relevant Memories\n"
                 "The following information from memory may be relevant:\n\n"
                 + "\n".join(memory_lines)

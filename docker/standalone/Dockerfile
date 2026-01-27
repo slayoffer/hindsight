@@ -178,7 +178,7 @@ print('Downloading embedding model...'); \
 SentenceTransformer('BAAI/bge-small-en-v1.5'); \
 print('Downloading cross-encoder model...'); \
 CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
-print('Models cached successfully')"; \
+print('Downloading tiktoken encoding...'); import tiktoken; tiktoken.get_encoding('cl100k_base'); print('Models cached successfully')"; \
     elif [ "$INCLUDE_LOCAL_MODELS" != "true" ]; then echo "Skipping ML model preload (local-models not included)"; \
     else echo "Skipping ML model preload"; fi
 
