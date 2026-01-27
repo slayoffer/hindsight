@@ -7,8 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Hindsight is an agent memory system that provides long-term memory for AI agents using biomimetic data structures. Memories are organized as:
 - **World facts**: General knowledge ("The sky is blue")
 - **Experience facts**: Personal experiences ("I visited Paris in 2023")
-- **Opinion facts**: Beliefs with confidence scores ("Paris is beautiful" - 0.9 confidence)
-- **Observations**: Complex mental models derived from reflection
+- **Mental models**: Consolidated knowledge synthesized from facts ("User prefers functional programming patterns")
 
 ## Development Commands
 
@@ -101,7 +100,7 @@ cd hindsight-control-plane && npm run dev
 Main operations:
 - **Retain**: Store memories, extracts facts/entities/relationships
 - **Recall**: Retrieve memories via 4 parallel strategies (semantic, BM25, graph, temporal) + reranking
-- **Reflect**: Deep analysis forming new opinions/observations (disposition-aware)
+- **Reflect**: Disposition-aware reasoning using memories and mental models
 
 ### Database
 PostgreSQL with pgvector. Schema managed via Alembic migrations in `hindsight-api/hindsight_api/alembic/`. Migrations run automatically on API startup.
@@ -199,6 +198,38 @@ When adding or modifying parameters in the dataplane API (hindsight-api), you mu
 - Pydantic models for request/response
 - Ruff for linting (line-length 120)
 - No Python files at project root - maintain clean directory structure
+- **Never use multi-item tuple return values** - prefer dataclass or Pydantic model for structured returns
+
+### Type Safety with Pydantic Models
+**NEVER use raw `dict` types for structured data.** Always use Pydantic models:
+- Use Pydantic `BaseModel` for all data structures passed between functions
+- Add `@field_validator` for type coercion (e.g., ensuring datetimes are timezone-aware)
+- Avoid `dict.get()` patterns - use typed model attributes instead
+- Parse external data (JSON, API responses) into Pydantic models at the boundary
+- This catches type errors at parse time, not deep in business logic
+
+```python
+# BAD - error-prone dict access
+def process(data: dict) -> str:
+    return data.get("name", "")  # No validation, silent failures
+
+# GOOD - typed and validated
+class UserData(BaseModel):
+    name: str
+    created_at: datetime
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def ensure_tz_aware(cls, v):
+        if isinstance(v, str):
+            v = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        if v.tzinfo is None:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
+def process(data: UserData) -> str:
+    return data.name  # Type-safe, validated at construction
+```
 
 ### TypeScript Style
 - Next.js App Router for control plane

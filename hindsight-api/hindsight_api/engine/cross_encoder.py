@@ -130,13 +130,28 @@ class LocalSTCrossEncoder(CrossEncoderModel):
                 "Install it with: pip install sentence-transformers"
             )
 
-        # Note: We use CPU even when GPU/MPS is available because:
-        # 1. The reranker model (MiniLM) is tiny (~22M params)
-        # 2. Batch sizes are small (~100-200 pairs)
-        # 3. Data transfer overhead to GPU outweighs compute benefit
-        # 4. CPU inference is actually faster for this workload
         logger.info(f"Reranker: initializing local provider with model {self.model_name}")
-        self._model = CrossEncoder(self.model_name)
+
+        # Determine device based on hardware availability.
+        # We always set low_cpu_mem_usage=False to prevent lazy loading (meta tensors)
+        # which can cause issues when accelerate is installed but no GPU is available.
+        # Note: We do NOT use device_map because CrossEncoder internally calls .to(device)
+        # after loading, which conflicts with accelerate's device_map handling.
+        import torch
+
+        # Check for GPU (CUDA) or Apple Silicon (MPS)
+        has_gpu = torch.cuda.is_available() or (hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+
+        if has_gpu:
+            device = None  # Let sentence-transformers auto-detect GPU/MPS
+        else:
+            device = "cpu"
+
+        self._model = CrossEncoder(
+            self.model_name,
+            device=device,
+            model_kwargs={"low_cpu_mem_usage": False},
+        )
 
         # Initialize shared executor (limited workers naturally limits concurrency)
         if LocalSTCrossEncoder._executor is None:

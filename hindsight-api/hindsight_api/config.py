@@ -4,9 +4,12 @@ Centralized configuration for Hindsight API.
 All environment variables and their defaults are defined here.
 """
 
+import json
 import logging
 import os
+import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -35,6 +38,11 @@ ENV_REFLECT_LLM_PROVIDER = "HINDSIGHT_API_REFLECT_LLM_PROVIDER"
 ENV_REFLECT_LLM_API_KEY = "HINDSIGHT_API_REFLECT_LLM_API_KEY"
 ENV_REFLECT_LLM_MODEL = "HINDSIGHT_API_REFLECT_LLM_MODEL"
 ENV_REFLECT_LLM_BASE_URL = "HINDSIGHT_API_REFLECT_LLM_BASE_URL"
+
+ENV_CONSOLIDATION_LLM_PROVIDER = "HINDSIGHT_API_CONSOLIDATION_LLM_PROVIDER"
+ENV_CONSOLIDATION_LLM_API_KEY = "HINDSIGHT_API_CONSOLIDATION_LLM_API_KEY"
+ENV_CONSOLIDATION_LLM_MODEL = "HINDSIGHT_API_CONSOLIDATION_LLM_MODEL"
+ENV_CONSOLIDATION_LLM_BASE_URL = "HINDSIGHT_API_CONSOLIDATION_LLM_BASE_URL"
 
 ENV_EMBEDDINGS_PROVIDER = "HINDSIGHT_API_EMBEDDINGS_PROVIDER"
 ENV_EMBEDDINGS_LOCAL_MODEL = "HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL"
@@ -68,6 +76,7 @@ ENV_RERANKER_FLASHRANK_CACHE_DIR = "HINDSIGHT_API_RERANKER_FLASHRANK_CACHE_DIR"
 ENV_HOST = "HINDSIGHT_API_HOST"
 ENV_PORT = "HINDSIGHT_API_PORT"
 ENV_LOG_LEVEL = "HINDSIGHT_API_LOG_LEVEL"
+ENV_LOG_FORMAT = "HINDSIGHT_API_LOG_FORMAT"
 ENV_WORKERS = "HINDSIGHT_API_WORKERS"
 ENV_MCP_ENABLED = "HINDSIGHT_API_MCP_ENABLED"
 ENV_GRAPH_RETRIEVER = "HINDSIGHT_API_GRAPH_RETRIEVER"
@@ -76,6 +85,7 @@ ENV_RECALL_MAX_CONCURRENT = "HINDSIGHT_API_RECALL_MAX_CONCURRENT"
 ENV_RECALL_CONNECTION_BUDGET = "HINDSIGHT_API_RECALL_CONNECTION_BUDGET"
 ENV_MCP_LOCAL_BANK_ID = "HINDSIGHT_API_MCP_LOCAL_BANK_ID"
 ENV_MCP_INSTRUCTIONS = "HINDSIGHT_API_MCP_INSTRUCTIONS"
+ENV_MENTAL_MODEL_REFRESH_CONCURRENCY = "HINDSIGHT_API_MENTAL_MODEL_REFRESH_CONCURRENCY"
 
 # Observation thresholds
 ENV_OBSERVATION_MIN_FACTS = "HINDSIGHT_API_OBSERVATION_MIN_FACTS"
@@ -87,6 +97,11 @@ ENV_RETAIN_CHUNK_SIZE = "HINDSIGHT_API_RETAIN_CHUNK_SIZE"
 ENV_RETAIN_EXTRACT_CAUSAL_LINKS = "HINDSIGHT_API_RETAIN_EXTRACT_CAUSAL_LINKS"
 ENV_RETAIN_EXTRACTION_MODE = "HINDSIGHT_API_RETAIN_EXTRACTION_MODE"
 ENV_RETAIN_OBSERVATIONS_ASYNC = "HINDSIGHT_API_RETAIN_OBSERVATIONS_ASYNC"
+
+# Mental models settings
+ENV_ENABLE_MENTAL_MODELS = "HINDSIGHT_API_ENABLE_MENTAL_MODELS"
+ENV_CONSOLIDATION_SIMILARITY_THRESHOLD = "HINDSIGHT_API_CONSOLIDATION_SIMILARITY_THRESHOLD"
+ENV_CONSOLIDATION_BATCH_SIZE = "HINDSIGHT_API_CONSOLIDATION_BATCH_SIZE"
 
 # Optimization flags
 ENV_SKIP_LLM_VERIFICATION = "HINDSIGHT_API_SKIP_LLM_VERIFICATION"
@@ -101,10 +116,16 @@ ENV_DB_POOL_MAX_SIZE = "HINDSIGHT_API_DB_POOL_MAX_SIZE"
 ENV_DB_COMMAND_TIMEOUT = "HINDSIGHT_API_DB_COMMAND_TIMEOUT"
 ENV_DB_ACQUIRE_TIMEOUT = "HINDSIGHT_API_DB_ACQUIRE_TIMEOUT"
 
-# Background task processing
-ENV_TASK_BACKEND = "HINDSIGHT_API_TASK_BACKEND"
-ENV_TASK_BACKEND_MEMORY_BATCH_SIZE = "HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_SIZE"
-ENV_TASK_BACKEND_MEMORY_BATCH_INTERVAL = "HINDSIGHT_API_TASK_BACKEND_MEMORY_BATCH_INTERVAL"
+# Worker configuration (distributed task processing)
+ENV_WORKER_ENABLED = "HINDSIGHT_API_WORKER_ENABLED"
+ENV_WORKER_ID = "HINDSIGHT_API_WORKER_ID"
+ENV_WORKER_POLL_INTERVAL_MS = "HINDSIGHT_API_WORKER_POLL_INTERVAL_MS"
+ENV_WORKER_MAX_RETRIES = "HINDSIGHT_API_WORKER_MAX_RETRIES"
+ENV_WORKER_BATCH_SIZE = "HINDSIGHT_API_WORKER_BATCH_SIZE"
+ENV_WORKER_HTTP_PORT = "HINDSIGHT_API_WORKER_HTTP_PORT"
+
+# Reflect agent settings
+ENV_REFLECT_MAX_ITERATIONS = "HINDSIGHT_API_REFLECT_MAX_ITERATIONS"
 
 # Default values
 DEFAULT_DATABASE_URL = "pg0"
@@ -138,6 +159,7 @@ DEFAULT_RERANKER_LITELLM_MODEL = "cohere/rerank-english-v3.0"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8888
 DEFAULT_LOG_LEVEL = "info"
+DEFAULT_LOG_FORMAT = "text"  # Options: "text", "json"
 DEFAULT_WORKERS = 1
 DEFAULT_MCP_ENABLED = True
 DEFAULT_GRAPH_RETRIEVER = "link_expansion"  # Options: "link_expansion", "mpfp", "bfs"
@@ -145,6 +167,7 @@ DEFAULT_MPFP_TOP_K_NEIGHBORS = 20  # Fan-out limit per node in MPFP graph traver
 DEFAULT_RECALL_MAX_CONCURRENT = 32  # Max concurrent recall operations per worker
 DEFAULT_RECALL_CONNECTION_BUDGET = 4  # Max concurrent DB connections per recall operation
 DEFAULT_MCP_LOCAL_BANK_ID = "mcp"
+DEFAULT_MENTAL_MODEL_REFRESH_CONCURRENCY = 8  # Max concurrent mental model refreshes
 
 # Observation thresholds
 DEFAULT_OBSERVATION_MIN_FACTS = 5  # Min facts required to generate entity observations
@@ -158,6 +181,11 @@ DEFAULT_RETAIN_EXTRACTION_MODE = "concise"  # Extraction mode: "concise" or "ver
 RETAIN_EXTRACTION_MODES = ("concise", "verbose")  # Allowed extraction modes
 DEFAULT_RETAIN_OBSERVATIONS_ASYNC = False  # Run observation generation async (after retain completes)
 
+# Mental models defaults
+DEFAULT_ENABLE_MENTAL_MODELS = False  # Mental models disabled by default (experimental)
+DEFAULT_CONSOLIDATION_SIMILARITY_THRESHOLD = 0.75  # Minimum similarity to consider a learning related
+DEFAULT_CONSOLIDATION_BATCH_SIZE = 50  # Memories to load per batch (internal memory optimization)
+
 # Database migrations
 DEFAULT_RUN_MIGRATIONS_ON_STARTUP = True
 
@@ -167,10 +195,16 @@ DEFAULT_DB_POOL_MAX_SIZE = 100
 DEFAULT_DB_COMMAND_TIMEOUT = 60  # seconds
 DEFAULT_DB_ACQUIRE_TIMEOUT = 30  # seconds
 
-# Background task processing
-DEFAULT_TASK_BACKEND = "memory"  # Options: "memory", "noop"
-DEFAULT_TASK_BACKEND_MEMORY_BATCH_SIZE = 10
-DEFAULT_TASK_BACKEND_MEMORY_BATCH_INTERVAL = 1.0  # seconds
+# Worker configuration (distributed task processing)
+DEFAULT_WORKER_ENABLED = True  # API runs worker by default (standalone mode)
+DEFAULT_WORKER_ID = None  # Will use hostname if not specified
+DEFAULT_WORKER_POLL_INTERVAL_MS = 500  # Poll database every 500ms
+DEFAULT_WORKER_MAX_RETRIES = 3  # Max retries before marking task failed
+DEFAULT_WORKER_BATCH_SIZE = 10  # Tasks to claim per poll cycle
+DEFAULT_WORKER_HTTP_PORT = 8889  # HTTP port for worker metrics/health
+
+# Reflect agent settings
+DEFAULT_REFLECT_MAX_ITERATIONS = 10  # Max tool call iterations before forcing response
 
 # Default MCP tool descriptions (can be customized via env vars)
 DEFAULT_MCP_RETAIN_DESCRIPTION = """Store important information to long-term memory.
@@ -194,6 +228,36 @@ Use this tool PROACTIVELY to:
 
 # Default embedding dimension (used by initial migration, adjusted at runtime)
 EMBEDDING_DIMENSION = DEFAULT_EMBEDDING_DIMENSION
+
+
+class JsonFormatter(logging.Formatter):
+    """JSON formatter for structured logging.
+
+    Outputs logs in JSON format with a 'severity' field that cloud logging
+    systems (GCP, AWS CloudWatch, etc.) can parse to correctly categorize log levels.
+    """
+
+    SEVERITY_MAP = {
+        logging.DEBUG: "DEBUG",
+        logging.INFO: "INFO",
+        logging.WARNING: "WARNING",
+        logging.ERROR: "ERROR",
+        logging.CRITICAL: "CRITICAL",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry = {
+            "severity": self.SEVERITY_MAP.get(record.levelno, "DEFAULT"),
+            "message": record.getMessage(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "logger": record.name,
+        }
+
+        # Add exception info if present
+        if record.exc_info:
+            log_entry["exception"] = self.formatException(record.exc_info)
+
+        return json.dumps(log_entry)
 
 
 def _validate_extraction_mode(mode: str) -> str:
@@ -234,6 +298,11 @@ class HindsightConfig:
     reflect_llm_model: str | None
     reflect_llm_base_url: str | None
 
+    consolidation_llm_provider: str | None
+    consolidation_llm_api_key: str | None
+    consolidation_llm_model: str | None
+    consolidation_llm_base_url: str | None
+
     # Embeddings
     embeddings_provider: str
     embeddings_local_model: str
@@ -254,6 +323,7 @@ class HindsightConfig:
     host: str
     port: int
     log_level: str
+    log_format: str
     mcp_enabled: bool
 
     # Recall
@@ -261,6 +331,7 @@ class HindsightConfig:
     mpfp_top_k_neighbors: int
     recall_max_concurrent: int
     recall_connection_budget: int
+    mental_model_refresh_concurrency: int
 
     # Observation thresholds
     observation_min_facts: int
@@ -272,6 +343,11 @@ class HindsightConfig:
     retain_extract_causal_links: bool
     retain_extraction_mode: str
     retain_observations_async: bool
+
+    # Mental models settings
+    enable_mental_models: bool
+    consolidation_similarity_threshold: float
+    consolidation_batch_size: int
 
     # Optimization flags
     skip_llm_verification: bool
@@ -286,10 +362,16 @@ class HindsightConfig:
     db_command_timeout: int
     db_acquire_timeout: int
 
-    # Background task processing
-    task_backend: str
-    task_backend_memory_batch_size: int
-    task_backend_memory_batch_interval: float
+    # Worker configuration (distributed task processing)
+    worker_enabled: bool
+    worker_id: str | None
+    worker_poll_interval_ms: int
+    worker_max_retries: int
+    worker_batch_size: int
+    worker_http_port: int
+
+    # Reflect agent settings
+    reflect_max_iterations: int
 
     @classmethod
     def from_env(cls) -> "HindsightConfig":
@@ -313,6 +395,10 @@ class HindsightConfig:
             reflect_llm_api_key=os.getenv(ENV_REFLECT_LLM_API_KEY) or None,
             reflect_llm_model=os.getenv(ENV_REFLECT_LLM_MODEL) or None,
             reflect_llm_base_url=os.getenv(ENV_REFLECT_LLM_BASE_URL) or None,
+            consolidation_llm_provider=os.getenv(ENV_CONSOLIDATION_LLM_PROVIDER) or None,
+            consolidation_llm_api_key=os.getenv(ENV_CONSOLIDATION_LLM_API_KEY) or None,
+            consolidation_llm_model=os.getenv(ENV_CONSOLIDATION_LLM_MODEL) or None,
+            consolidation_llm_base_url=os.getenv(ENV_CONSOLIDATION_LLM_BASE_URL) or None,
             # Embeddings
             embeddings_provider=os.getenv(ENV_EMBEDDINGS_PROVIDER, DEFAULT_EMBEDDINGS_PROVIDER),
             embeddings_local_model=os.getenv(ENV_EMBEDDINGS_LOCAL_MODEL, DEFAULT_EMBEDDINGS_LOCAL_MODEL),
@@ -333,6 +419,7 @@ class HindsightConfig:
             host=os.getenv(ENV_HOST, DEFAULT_HOST),
             port=int(os.getenv(ENV_PORT, DEFAULT_PORT)),
             log_level=os.getenv(ENV_LOG_LEVEL, DEFAULT_LOG_LEVEL),
+            log_format=os.getenv(ENV_LOG_FORMAT, DEFAULT_LOG_FORMAT).lower(),
             mcp_enabled=os.getenv(ENV_MCP_ENABLED, str(DEFAULT_MCP_ENABLED)).lower() == "true",
             # Recall
             graph_retriever=os.getenv(ENV_GRAPH_RETRIEVER, DEFAULT_GRAPH_RETRIEVER),
@@ -340,6 +427,9 @@ class HindsightConfig:
             recall_max_concurrent=int(os.getenv(ENV_RECALL_MAX_CONCURRENT, str(DEFAULT_RECALL_MAX_CONCURRENT))),
             recall_connection_budget=int(
                 os.getenv(ENV_RECALL_CONNECTION_BUDGET, str(DEFAULT_RECALL_CONNECTION_BUDGET))
+            ),
+            mental_model_refresh_concurrency=int(
+                os.getenv(ENV_MENTAL_MODEL_REFRESH_CONCURRENCY, str(DEFAULT_MENTAL_MODEL_REFRESH_CONCURRENCY))
             ),
             # Optimization flags
             skip_llm_verification=os.getenv(ENV_SKIP_LLM_VERIFICATION, "false").lower() == "true",
@@ -365,6 +455,15 @@ class HindsightConfig:
                 ENV_RETAIN_OBSERVATIONS_ASYNC, str(DEFAULT_RETAIN_OBSERVATIONS_ASYNC)
             ).lower()
             == "true",
+            # Mental models settings
+            enable_mental_models=os.getenv(ENV_ENABLE_MENTAL_MODELS, str(DEFAULT_ENABLE_MENTAL_MODELS)).lower()
+            == "true",
+            consolidation_similarity_threshold=float(
+                os.getenv(ENV_CONSOLIDATION_SIMILARITY_THRESHOLD, str(DEFAULT_CONSOLIDATION_SIMILARITY_THRESHOLD))
+            ),
+            consolidation_batch_size=int(
+                os.getenv(ENV_CONSOLIDATION_BATCH_SIZE, str(DEFAULT_CONSOLIDATION_BATCH_SIZE))
+            ),
             # Database migrations
             run_migrations_on_startup=os.getenv(ENV_RUN_MIGRATIONS_ON_STARTUP, "true").lower() == "true",
             # Database connection pool
@@ -372,14 +471,15 @@ class HindsightConfig:
             db_pool_max_size=int(os.getenv(ENV_DB_POOL_MAX_SIZE, str(DEFAULT_DB_POOL_MAX_SIZE))),
             db_command_timeout=int(os.getenv(ENV_DB_COMMAND_TIMEOUT, str(DEFAULT_DB_COMMAND_TIMEOUT))),
             db_acquire_timeout=int(os.getenv(ENV_DB_ACQUIRE_TIMEOUT, str(DEFAULT_DB_ACQUIRE_TIMEOUT))),
-            # Background task processing
-            task_backend=os.getenv(ENV_TASK_BACKEND, DEFAULT_TASK_BACKEND),
-            task_backend_memory_batch_size=int(
-                os.getenv(ENV_TASK_BACKEND_MEMORY_BATCH_SIZE, str(DEFAULT_TASK_BACKEND_MEMORY_BATCH_SIZE))
-            ),
-            task_backend_memory_batch_interval=float(
-                os.getenv(ENV_TASK_BACKEND_MEMORY_BATCH_INTERVAL, str(DEFAULT_TASK_BACKEND_MEMORY_BATCH_INTERVAL))
-            ),
+            # Worker configuration
+            worker_enabled=os.getenv(ENV_WORKER_ENABLED, str(DEFAULT_WORKER_ENABLED)).lower() == "true",
+            worker_id=os.getenv(ENV_WORKER_ID) or DEFAULT_WORKER_ID,
+            worker_poll_interval_ms=int(os.getenv(ENV_WORKER_POLL_INTERVAL_MS, str(DEFAULT_WORKER_POLL_INTERVAL_MS))),
+            worker_max_retries=int(os.getenv(ENV_WORKER_MAX_RETRIES, str(DEFAULT_WORKER_MAX_RETRIES))),
+            worker_batch_size=int(os.getenv(ENV_WORKER_BATCH_SIZE, str(DEFAULT_WORKER_BATCH_SIZE))),
+            worker_http_port=int(os.getenv(ENV_WORKER_HTTP_PORT, str(DEFAULT_WORKER_HTTP_PORT))),
+            # Reflect agent settings
+            reflect_max_iterations=int(os.getenv(ENV_REFLECT_MAX_ITERATIONS, str(DEFAULT_REFLECT_MAX_ITERATIONS))),
         )
 
     def get_llm_base_url(self) -> str:
@@ -410,12 +510,28 @@ class HindsightConfig:
         return log_level_map.get(self.log_level.lower(), logging.INFO)
 
     def configure_logging(self) -> None:
-        """Configure Python logging based on the log level."""
-        logging.basicConfig(
-            level=self.get_python_log_level(),
-            format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-            force=True,  # Override any existing configuration
-        )
+        """Configure Python logging based on the log level and format.
+
+        When log_format is "json", outputs structured JSON logs with a severity
+        field that GCP Cloud Logging can parse for proper log level categorization.
+        """
+        root_logger = logging.getLogger()
+        root_logger.setLevel(self.get_python_log_level())
+
+        # Remove existing handlers
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+
+        # Create handler writing to stdout (GCP treats stderr as ERROR)
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setLevel(self.get_python_log_level())
+
+        if self.log_format == "json":
+            handler.setFormatter(JsonFormatter())
+        else:
+            handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(name)s - %(message)s"))
+
+        root_logger.addHandler(handler)
 
     def log_config(self) -> None:
         """Log the current configuration (without sensitive values)."""
@@ -429,6 +545,10 @@ class HindsightConfig:
             reflect_provider = self.reflect_llm_provider or self.llm_provider
             reflect_model = self.reflect_llm_model or self.llm_model
             logger.info(f"LLM (reflect): provider={reflect_provider}, model={reflect_model}")
+        if self.consolidation_llm_provider or self.consolidation_llm_model:
+            consolidation_provider = self.consolidation_llm_provider or self.llm_provider
+            consolidation_model = self.consolidation_llm_model or self.llm_model
+            logger.info(f"LLM (consolidation): provider={consolidation_provider}, model={consolidation_model}")
         logger.info(f"Embeddings: provider={self.embeddings_provider}")
         logger.info(f"Reranker: provider={self.reranker_provider}")
         logger.info(f"Graph retriever: {self.graph_retriever}")

@@ -117,6 +117,7 @@ impl ApiClient {
         self.runtime.block_on(async {
             let request = types::CreateBankRequest {
                 name: Some(name.to_string()),
+                mission: None,
                 background: None,
                 disposition: None,
             };
@@ -172,7 +173,7 @@ impl ApiClient {
     pub fn poll_operation(&self, agent_id: &str, operation_id: &str, verbose: bool) -> Result<(bool, Option<String>)> {
         self.runtime.block_on(async {
             loop {
-                let response = self.client.list_operations(agent_id, None).await?;
+                let response = self.client.list_operations(agent_id, None, None, None, None).await?;
                 let ops = response.into_inner();
 
                 // Find our operation
@@ -257,7 +258,7 @@ impl ApiClient {
 
     pub fn list_operations(&self, agent_id: &str, _verbose: bool) -> Result<OperationsResponse> {
         self.runtime.block_on(async {
-            let response = self.client.list_operations(agent_id, None).await?;
+            let response = self.client.list_operations(agent_id, None, None, None, None).await?;
             let value = response.into_inner();
             // Convert to JSON Value first, then parse into our type
             let json_value = serde_json::to_value(&value)?;
@@ -310,6 +311,231 @@ impl ApiClient {
     pub fn delete_bank(&self, bank_id: &str, _verbose: bool) -> Result<types::DeleteResponse> {
         self.runtime.block_on(async {
             let response = self.client.delete_bank(bank_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+}
+
+// ============================================================================
+// Additional API methods for complete CLI coverage
+// ============================================================================
+
+impl ApiClient {
+    // --- Memory Methods ---
+
+    pub fn get_memory(&self, bank_id: &str, memory_id: &str, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.get_memory(bank_id, memory_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Bank Methods ---
+
+    pub fn create_bank(
+        &self,
+        bank_id: &str,
+        request: &types::CreateBankRequest,
+        _verbose: bool,
+    ) -> Result<types::BankProfileResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.create_or_update_bank(bank_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn update_bank(
+        &self,
+        bank_id: &str,
+        request: &types::CreateBankRequest,
+        _verbose: bool,
+    ) -> Result<types::BankProfileResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.update_bank(bank_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn set_mission(
+        &self,
+        bank_id: &str,
+        mission: &str,
+        _verbose: bool,
+    ) -> Result<types::BankProfileResponse> {
+        self.runtime.block_on(async {
+            let request = types::CreateBankRequest {
+                name: None,
+                mission: Some(mission.to_string()),
+                background: None,
+                disposition: None,
+            };
+            let response = self.client.update_bank(bank_id, None, &request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn get_graph(
+        &self,
+        bank_id: &str,
+        type_filter: Option<&str>,
+        limit: Option<i64>,
+        _verbose: bool,
+    ) -> Result<types::GraphDataResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_graph(bank_id, limit, type_filter, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Tag Methods ---
+
+    pub fn list_tags(
+        &self,
+        bank_id: &str,
+        q: Option<&str>,
+        limit: Option<i64>,
+        offset: Option<i64>,
+        _verbose: bool,
+    ) -> Result<types::ListTagsResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.list_tags(bank_id, limit, offset, q, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Chunk Methods ---
+
+    pub fn get_chunk(&self, chunk_id: &str, _verbose: bool) -> Result<types::ChunkResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_chunk(chunk_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Operation Methods ---
+
+    pub fn get_operation(&self, bank_id: &str, operation_id: &str, _verbose: bool) -> Result<types::OperationStatusResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_operation_status(bank_id, operation_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Health Methods ---
+
+    pub fn health(&self, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.health_endpoint_health_get().await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn metrics(&self, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.metrics_endpoint_metrics_get().await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Reflection Methods ---
+
+    pub fn list_reflections(&self, bank_id: &str, _verbose: bool) -> Result<types::ReflectionListResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.list_reflections(bank_id, None, None, None, None, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn get_reflection(&self, bank_id: &str, reflection_id: &str, _verbose: bool) -> Result<types::ReflectionResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_reflection(bank_id, reflection_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn create_reflection(
+        &self,
+        bank_id: &str,
+        request: &types::CreateReflectionRequest,
+        _verbose: bool,
+    ) -> Result<types::CreateReflectionResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.create_reflection(bank_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn update_reflection(
+        &self,
+        bank_id: &str,
+        reflection_id: &str,
+        request: &types::UpdateReflectionRequest,
+        _verbose: bool,
+    ) -> Result<types::ReflectionResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.update_reflection(bank_id, reflection_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn delete_reflection(&self, bank_id: &str, reflection_id: &str, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.delete_reflection(bank_id, reflection_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn refresh_reflection(&self, bank_id: &str, reflection_id: &str, _verbose: bool) -> Result<types::AsyncOperationSubmitResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.refresh_reflection(bank_id, reflection_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Directive Methods ---
+
+    pub fn list_directives(&self, bank_id: &str, _verbose: bool) -> Result<types::DirectiveListResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.list_directives(bank_id, None, None, None, None, None, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn get_directive(&self, bank_id: &str, directive_id: &str, _verbose: bool) -> Result<types::DirectiveResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_directive(bank_id, directive_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn create_directive(
+        &self,
+        bank_id: &str,
+        request: &types::CreateDirectiveRequest,
+        _verbose: bool,
+    ) -> Result<types::DirectiveResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.create_directive(bank_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn update_directive(
+        &self,
+        bank_id: &str,
+        directive_id: &str,
+        request: &types::UpdateDirectiveRequest,
+        _verbose: bool,
+    ) -> Result<types::DirectiveResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.update_directive(bank_id, directive_id, None, request).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn delete_directive(&self, bank_id: &str, directive_id: &str, _verbose: bool) -> Result<serde_json::Value> {
+        self.runtime.block_on(async {
+            let response = self.client.delete_directive(bank_id, directive_id, None).await?;
             Ok(response.into_inner())
         })
     }

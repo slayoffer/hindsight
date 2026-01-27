@@ -33,6 +33,28 @@
         }
       }
     },
+    "/version": {
+      "get": {
+        "tags": [
+          "Monitoring"
+        ],
+        "summary": "Get API version and feature flags",
+        "description": "Returns API version information and enabled feature flags. Use this to check which capabilities are available in this deployment.",
+        "operationId": "get_version",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": [
@@ -718,9 +740,10 @@
         "tags": [
           "Entities"
         ],
-        "summary": "Regenerate entity observations",
-        "description": "Regenerate observations for an entity based on all facts mentioning it.",
+        "summary": "Regenerate entity observations (deprecated)",
+        "description": "This endpoint is deprecated. Entity observations have been replaced by mental models.",
         "operationId": "regenerate_entity_observations",
+        "deprecated": true,
         "parameters": [
           {
             "name": "bank_id",
@@ -765,6 +788,876 @@
                 "schema": {
                   "$ref": "#/components/schemas/EntityDetailResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/reflections": {
+      "get": {
+        "tags": [
+          "Reflections"
+        ],
+        "summary": "List reflections",
+        "description": "List user-curated living documents that stay current.",
+        "operationId": "list_reflections",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by tags",
+              "title": "Tags"
+            },
+            "description": "Filter by tags"
+          },
+          {
+            "name": "tags_match",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "any",
+                "all",
+                "exact"
+              ],
+              "type": "string",
+              "description": "How to match tags",
+              "default": "any",
+              "title": "Tags Match"
+            },
+            "description": "How to match tags"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReflectionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Reflections"
+        ],
+        "summary": "Create reflection",
+        "description": "Create a reflection by running reflect with the source query in the background. Returns an operation ID to track progress. The content is auto-generated by the reflect endpoint. Use the operations endpoint to check completion status.",
+        "operationId": "create_reflection",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReflectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateReflectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/reflections/{reflection_id}": {
+      "get": {
+        "tags": [
+          "Reflections"
+        ],
+        "summary": "Get reflection",
+        "description": "Get a specific reflection by ID.",
+        "operationId": "get_reflection",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "reflection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Reflection Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReflectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Reflections"
+        ],
+        "summary": "Update reflection",
+        "description": "Update a reflection's name.",
+        "operationId": "update_reflection",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "reflection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Reflection Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateReflectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReflectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Reflections"
+        ],
+        "summary": "Delete reflection",
+        "description": "Delete a reflection.",
+        "operationId": "delete_reflection",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "reflection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Reflection Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/reflections/{reflection_id}/refresh": {
+      "post": {
+        "tags": [
+          "Reflections"
+        ],
+        "summary": "Refresh reflection",
+        "description": "Submit an async task to re-run the source query through reflect and update the content.",
+        "operationId": "refresh_reflection",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "reflection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Reflection Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsyncOperationSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/directives": {
+      "get": {
+        "tags": [
+          "Directives"
+        ],
+        "summary": "List directives",
+        "description": "List hard rules that are injected into prompts.",
+        "operationId": "list_directives",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by tags",
+              "title": "Tags"
+            },
+            "description": "Filter by tags"
+          },
+          {
+            "name": "tags_match",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "any",
+                "all",
+                "exact"
+              ],
+              "type": "string",
+              "description": "How to match tags",
+              "default": "any",
+              "title": "Tags Match"
+            },
+            "description": "How to match tags"
+          },
+          {
+            "name": "active_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Only return active directives",
+              "default": true,
+              "title": "Active Only"
+            },
+            "description": "Only return active directives"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectiveListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Directives"
+        ],
+        "summary": "Create directive",
+        "description": "Create a hard rule that will be injected into prompts.",
+        "operationId": "create_directive",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDirectiveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectiveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/directives/{directive_id}": {
+      "get": {
+        "tags": [
+          "Directives"
+        ],
+        "summary": "Get directive",
+        "description": "Get a specific directive by ID.",
+        "operationId": "get_directive",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "directive_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Directive Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectiveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Directives"
+        ],
+        "summary": "Update directive",
+        "description": "Update a directive's properties.",
+        "operationId": "update_directive",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "directive_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Directive Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDirectiveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectiveResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Directives"
+        ],
+        "summary": "Delete directive",
+        "description": "Delete a directive.",
+        "operationId": "delete_directive",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "directive_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Directive Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -1176,7 +2069,7 @@
           "Operations"
         ],
         "summary": "List async operations",
-        "description": "Get a list of all async operations (pending and failed) for a specific agent, including error messages for failed operations",
+        "description": "Get a list of async operations for a specific agent, with optional filtering by status. Results are sorted by most recent first.",
         "operationId": "list_operations",
         "parameters": [
           {
@@ -1187,6 +2080,51 @@
               "type": "string",
               "title": "Bank Id"
             }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by status: pending, completed, or failed",
+              "title": "Status"
+            },
+            "description": "Filter by status: pending, completed, or failed"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Maximum number of operations to return",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Maximum number of operations to return"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Number of operations to skip",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Number of operations to skip"
           },
           {
             "name": "authorization",
@@ -1230,6 +2168,72 @@
       }
     },
     "/v1/default/banks/{bank_id}/operations/{operation_id}": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Get operation status",
+        "description": "Get the status of a specific async operation. Returns 'pending', 'completed', or 'failed'. Completed operations are removed from storage, so 'completed' means the operation finished successfully.",
+        "operationId": "get_operation_status",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "delete": {
         "tags": [
           "Operations"
@@ -1303,7 +2307,7 @@
           "Banks"
         ],
         "summary": "Get memory bank profile",
-        "description": "Get disposition traits and background for a memory bank. Auto-creates agent with defaults if not exists.",
+        "description": "Get disposition traits and mission for a memory bank. Auto-creates agent with defaults if not exists.",
         "operationId": "get_bank_profile",
         "parameters": [
           {
@@ -1428,9 +2432,10 @@
         "tags": [
           "Banks"
         ],
-        "summary": "Add/merge memory bank background",
-        "description": "Add new background information or merge with existing. LLM intelligently resolves conflicts, normalizes to first person, and optionally infers disposition traits.",
+        "summary": "Add/merge memory bank background (deprecated)",
+        "description": "Deprecated: Use PUT /mission instead. This endpoint now updates the mission field.",
         "operationId": "add_bank_background",
+        "deprecated": true,
         "parameters": [
           {
             "name": "bank_id",
@@ -1498,8 +2503,75 @@
           "Banks"
         ],
         "summary": "Create or update memory bank",
-        "description": "Create a new agent or update existing agent with disposition and background. Auto-fills missing fields with defaults.",
+        "description": "Create a new agent or update existing agent with disposition and mission. Auto-fills missing fields with defaults.",
         "operationId": "create_or_update_bank",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBankRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Banks"
+        ],
+        "summary": "Partial update memory bank",
+        "description": "Partially update an agent's profile. Only provided fields will be updated.",
+        "operationId": "update_bank",
         "parameters": [
           {
             "name": "bank_id",
@@ -1601,6 +2673,124 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/mental-models": {
+      "delete": {
+        "tags": [
+          "Banks"
+        ],
+        "summary": "Clear all mental models",
+        "description": "Delete all mental models for a memory bank. This is useful for resetting the consolidated knowledge.",
+        "operationId": "clear_mental_models",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/default/banks/{bank_id}/consolidate": {
+      "post": {
+        "tags": [
+          "Banks"
+        ],
+        "summary": "Trigger consolidation",
+        "description": "Run memory consolidation to create/update mental models from recent memories.",
+        "operationId": "trigger_consolidation",
+        "parameters": [
+          {
+            "name": "bank_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bank Id"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolidationResponse"
                 }
               }
             }
@@ -1775,7 +2965,7 @@
           "update_disposition": {
             "type": "boolean",
             "title": "Update Disposition",
-            "description": "If true, infer disposition traits from the merged background (default: true)",
+            "description": "Deprecated - disposition is no longer auto-inferred from mission",
             "default": true
           }
         },
@@ -1784,17 +2974,52 @@
           "content"
         ],
         "title": "AddBackgroundRequest",
-        "description": "Request model for adding/merging background information.",
+        "description": "Request model for adding/merging background information. Deprecated: use SetMissionRequest instead.",
         "example": {
           "content": "I was born in Texas",
           "update_disposition": true
         }
       },
+      "AsyncOperationSubmitResponse": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation_id",
+          "status"
+        ],
+        "title": "AsyncOperationSubmitResponse",
+        "description": "Response model for submitting an async operation.",
+        "example": {
+          "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+          "status": "queued"
+        }
+      },
       "BackgroundResponse": {
         "properties": {
-          "background": {
+          "mission": {
             "type": "string",
-            "title": "Background"
+            "title": "Mission"
+          },
+          "background": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background",
+            "description": "Deprecated: same as mission"
           },
           "disposition": {
             "anyOf": [
@@ -1809,17 +3034,12 @@
         },
         "type": "object",
         "required": [
-          "background"
+          "mission"
         ],
         "title": "BackgroundResponse",
-        "description": "Response model for background update.",
+        "description": "Response model for background update. Deprecated: use MissionResponse instead.",
         "example": {
-          "background": "I was born in Texas. I am a software engineer with 10 years of experience.",
-          "disposition": {
-            "empathy": 3,
-            "literalism": 3,
-            "skepticism": 3
-          }
+          "mission": "I was born in Texas. I am a software engineer with 10 years of experience."
         }
       },
       "BankListItem": {
@@ -1842,7 +3062,7 @@
           "disposition": {
             "$ref": "#/components/schemas/DispositionTraits"
           },
-          "background": {
+          "mission": {
             "anyOf": [
               {
                 "type": "string"
@@ -1851,7 +3071,7 @@
                 "type": "null"
               }
             ],
-            "title": "Background"
+            "title": "Mission"
           },
           "created_at": {
             "anyOf": [
@@ -1903,7 +3123,6 @@
         "example": {
           "banks": [
             {
-              "background": "I am a software engineer",
               "bank_id": "user123",
               "created_at": "2024-01-15T10:30:00Z",
               "disposition": {
@@ -1911,6 +3130,7 @@
                 "literalism": 3,
                 "skepticism": 3
               },
+              "mission": "I am a software engineer helping my team ship quality code",
               "name": "Alice",
               "updated_at": "2024-01-16T14:20:00Z"
             }
@@ -1930,9 +3150,22 @@
           "disposition": {
             "$ref": "#/components/schemas/DispositionTraits"
           },
-          "background": {
+          "mission": {
             "type": "string",
-            "title": "Background"
+            "title": "Mission",
+            "description": "The agent's mission - who they are and what they're trying to accomplish"
+          },
+          "background": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background",
+            "description": "Deprecated: use mission instead"
           }
         },
         "type": "object",
@@ -1940,18 +3173,18 @@
           "bank_id",
           "name",
           "disposition",
-          "background"
+          "mission"
         ],
         "title": "BankProfileResponse",
         "description": "Response model for bank profile.",
         "example": {
-          "background": "I am a software engineer with 10 years of experience in startups",
           "bank_id": "user123",
           "disposition": {
             "empathy": 3,
             "literalism": 3,
             "skepticism": 3
           },
+          "mission": "I am a software engineer helping my team stay organized and ship quality code",
           "name": "Alice"
         }
       },
@@ -2011,6 +3244,30 @@
           "failed_operations": {
             "type": "integer",
             "title": "Failed Operations"
+          },
+          "last_consolidated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Consolidated At",
+            "description": "When consolidation last ran (ISO format)"
+          },
+          "pending_consolidation": {
+            "type": "integer",
+            "title": "Pending Consolidation",
+            "description": "Number of memories not yet processed into mental models",
+            "default": 0
+          },
+          "total_mental_models": {
+            "type": "integer",
+            "title": "Total Mental Models",
+            "description": "Total number of mental models",
+            "default": 0
           }
         },
         "type": "object",
@@ -2031,6 +3288,7 @@
         "example": {
           "bank_id": "user123",
           "failed_operations": 0,
+          "last_consolidated_at": "2024-01-15T10:30:00Z",
           "links_breakdown": {
             "fact": {
               "entity": 40,
@@ -2053,9 +3311,11 @@
             "observation": 20,
             "preference": 30
           },
+          "pending_consolidation": 0,
           "pending_operations": 2,
           "total_documents": 10,
           "total_links": 300,
+          "total_mental_models": 45,
           "total_nodes": 150
         }
       },
@@ -2188,6 +3448,27 @@
           "document_id": "session_1"
         }
       },
+      "ConsolidationResponse": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id",
+            "description": "ID of the async consolidation operation"
+          },
+          "deduplicated": {
+            "type": "boolean",
+            "title": "Deduplicated",
+            "description": "True if an existing pending task was reused",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation_id"
+        ],
+        "title": "ConsolidationResponse",
+        "description": "Response model for consolidation trigger endpoint."
+      },
       "CreateBankRequest": {
         "properties": {
           "name": {
@@ -2211,6 +3492,18 @@
               }
             ]
           },
+          "mission": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mission",
+            "description": "The agent's mission"
+          },
           "background": {
             "anyOf": [
               {
@@ -2220,21 +3513,123 @@
                 "type": "null"
               }
             ],
-            "title": "Background"
+            "title": "Background",
+            "description": "Deprecated: use mission instead"
           }
         },
         "type": "object",
         "title": "CreateBankRequest",
         "description": "Request model for creating/updating a bank.",
         "example": {
-          "background": "I am a creative software engineer with 10 years of experience",
           "disposition": {
             "empathy": 3,
             "literalism": 3,
             "skepticism": 3
           },
+          "mission": "I am a PM helping my engineering team stay organized",
           "name": "Alice"
         }
+      },
+      "CreateDirectiveRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable name for the directive"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "The directive text to inject into prompts"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "description": "Higher priority directives are injected first",
+            "default": 0
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "Whether this directive is active",
+            "default": true
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "description": "Tags for filtering"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "content"
+        ],
+        "title": "CreateDirectiveRequest",
+        "description": "Request model for creating a directive."
+      },
+      "CreateReflectionRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable name for the reflection"
+          },
+          "source_query": {
+            "type": "string",
+            "title": "Source Query",
+            "description": "The query to run to generate content"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "description": "Tags for scoped visibility"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "maximum": 8192.0,
+            "minimum": 256.0,
+            "title": "Max Tokens",
+            "description": "Maximum tokens for generated content",
+            "default": 2048
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "source_query"
+        ],
+        "title": "CreateReflectionRequest",
+        "description": "Request model for creating a reflection.",
+        "example": {
+          "max_tokens": 2048,
+          "name": "Team Communication Preferences",
+          "source_query": "How does the team prefer to communicate?",
+          "tags": [
+            "team"
+          ]
+        }
+      },
+      "CreateReflectionResponse": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id",
+            "description": "Operation ID to track progress"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation_id"
+        ],
+        "title": "CreateReflectionResponse",
+        "description": "Response model for reflection creation."
       },
       "DeleteDocumentResponse": {
         "properties": {
@@ -2311,6 +3706,91 @@
           "message": "Deleted successfully",
           "success": true
         }
+      },
+      "DirectiveListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DirectiveResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "DirectiveListResponse",
+        "description": "Response model for listing directives."
+      },
+      "DirectiveResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "bank_id": {
+            "type": "string",
+            "title": "Bank Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 0
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "bank_id",
+          "name",
+          "content"
+        ],
+        "title": "DirectiveResponse",
+        "description": "Response model for a directive."
       },
       "DispositionTraits": {
         "properties": {
@@ -2709,6 +4189,33 @@
         "type": "object",
         "title": "FactsIncludeOptions",
         "description": "Options for including facts (based_on) in reflect results."
+      },
+      "FeaturesInfo": {
+        "properties": {
+          "mental_models": {
+            "type": "boolean",
+            "title": "Mental Models",
+            "description": "Whether mental models (auto-consolidation) are enabled"
+          },
+          "mcp": {
+            "type": "boolean",
+            "title": "Mcp",
+            "description": "Whether MCP (Model Context Protocol) server is enabled"
+          },
+          "worker": {
+            "type": "boolean",
+            "title": "Worker",
+            "description": "Whether the background worker is enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mental_models",
+          "mcp",
+          "worker"
+        ],
+        "title": "FeaturesInfo",
+        "description": "Feature flags indicating which capabilities are enabled."
       },
       "GraphDataResponse": {
         "properties": {
@@ -3148,7 +4655,6 @@
           "id",
           "task_type",
           "items_count",
-          "document_id",
           "created_at",
           "status",
           "error_message"
@@ -3157,11 +4663,98 @@
         "description": "Response model for a single async operation.",
         "example": {
           "created_at": "2024-01-15T10:30:00Z",
-          "document_id": "meeting-notes-2024",
           "id": "550e8400-e29b-41d4-a716-446655440000",
           "items_count": 5,
           "status": "pending",
           "task_type": "retain"
+        }
+      },
+      "OperationStatusResponse": {
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "title": "Operation Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "completed",
+              "failed",
+              "not_found"
+            ],
+            "title": "Status"
+          },
+          "operation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Type"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation_id",
+          "status"
+        ],
+        "title": "OperationStatusResponse",
+        "description": "Response model for getting a single operation status.",
+        "example": {
+          "completed_at": "2024-01-15T10:31:30Z",
+          "created_at": "2024-01-15T10:30:00Z",
+          "operation_id": "550e8400-e29b-41d4-a716-446655440000",
+          "operation_type": "refresh_mental_models",
+          "status": "completed",
+          "updated_at": "2024-01-15T10:31:30Z"
         }
       },
       "OperationsListResponse": {
@@ -3169,6 +4762,18 @@
           "bank_id": {
             "type": "string",
             "title": "Bank Id"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
           },
           "operations": {
             "items": {
@@ -3181,21 +4786,26 @@
         "type": "object",
         "required": [
           "bank_id",
+          "total",
+          "limit",
+          "offset",
           "operations"
         ],
         "title": "OperationsListResponse",
         "description": "Response model for list operations endpoint.",
         "example": {
           "bank_id": "user123",
+          "limit": 20,
+          "offset": 0,
           "operations": [
             {
               "created_at": "2024-01-15T10:30:00Z",
               "id": "550e8400-e29b-41d4-a716-446655440000",
-              "items_count": 5,
               "status": "pending",
               "task_type": "retain"
             }
-          ]
+          ],
+          "total": 150
         }
       },
       "RecallRequest": {
@@ -3217,7 +4827,7 @@
               }
             ],
             "title": "Types",
-            "description": "List of fact types to recall (defaults to all if not specified)"
+            "description": "List of fact types to recall: 'world', 'experience', 'mental_model'. Defaults to world and experience if not specified. Note: 'opinion' is accepted but ignored (opinions are excluded from recall)."
           },
           "budget": {
             "$ref": "#/components/schemas/Budget",
@@ -3564,6 +5174,21 @@
           "type": "world"
         }
       },
+      "ReflectBasedOn": {
+        "properties": {
+          "memories": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectFact"
+            },
+            "type": "array",
+            "title": "Memories",
+            "description": "Memory facts used to generate the response"
+          }
+        },
+        "type": "object",
+        "title": "ReflectBasedOn",
+        "description": "Evidence the response is based on: memories and mental models."
+      },
       "ReflectFact": {
         "properties": {
           "id": {
@@ -3653,11 +5278,91 @@
               }
             ],
             "description": "Include facts that the answer is based on. Set to {} to enable, null to disable (default: disabled)."
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolCallsIncludeOptions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Include tool calls trace. Set to {} for full trace (input+output), {output: false} for inputs only."
           }
         },
         "type": "object",
         "title": "ReflectIncludeOptions",
         "description": "Options for including additional data in reflect results."
+      },
+      "ReflectLLMCall": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "description": "Call scope: agent_1, agent_2, final, etc."
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms",
+            "description": "Execution time in milliseconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "duration_ms"
+        ],
+        "title": "ReflectLLMCall",
+        "description": "An LLM call made during reflect agent execution."
+      },
+      "ReflectMentalModel": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Mental model ID"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Mental model name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Mental model type: entity, concept, event"
+          },
+          "subtype": {
+            "type": "string",
+            "title": "Subtype",
+            "description": "Mental model subtype: structural, emergent, learned, directive"
+          },
+          "observations": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observations",
+            "description": "Observations for directive mental models (subtype='directive')"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "subtype"
+        ],
+        "title": "ReflectMentalModel",
+        "description": "A mental model accessed during reflect."
       },
       "ReflectRequest": {
         "properties": {
@@ -3678,7 +5383,9 @@
                 "type": "null"
               }
             ],
-            "title": "Context"
+            "title": "Context",
+            "description": "DEPRECATED: Additional context is now concatenated with the query. Pass context directly in the query field instead. If provided, it will be appended to the query for backward compatibility.",
+            "deprecated": true
           },
           "max_tokens": {
             "type": "integer",
@@ -3739,7 +5446,6 @@
         "description": "Request model for reflect endpoint.",
         "example": {
           "budget": "low",
-          "context": "This is for a research paper on AI ethics",
           "include": {
             "facts": {}
           },
@@ -3776,12 +5482,15 @@
             "title": "Text"
           },
           "based_on": {
-            "items": {
-              "$ref": "#/components/schemas/ReflectFact"
-            },
-            "type": "array",
-            "title": "Based On",
-            "default": []
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReflectBasedOn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evidence used to generate the response. Only present when include.facts is set."
           },
           "structured_output": {
             "anyOf": [
@@ -3806,6 +5515,17 @@
               }
             ],
             "description": "Token usage metrics for LLM calls during reflection."
+          },
+          "trace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReflectTrace"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution trace of tool and LLM calls. Only present when include.tool_calls is set."
           }
         },
         "type": "object",
@@ -3815,18 +5535,20 @@
         "title": "ReflectResponse",
         "description": "Response model for think endpoint.",
         "example": {
-          "based_on": [
-            {
-              "id": "123",
-              "text": "AI is used in healthcare",
-              "type": "world"
-            },
-            {
-              "id": "456",
-              "text": "I discussed AI applications last week",
-              "type": "experience"
-            }
-          ],
+          "based_on": {
+            "memories": [
+              {
+                "id": "123",
+                "text": "AI is used in healthcare",
+                "type": "world"
+              },
+              {
+                "id": "456",
+                "text": "I discussed AI applications last week",
+                "type": "experience"
+              }
+            ]
+          },
           "structured_output": {
             "key_points": [
               "Used in healthcare",
@@ -3835,12 +5557,208 @@
             "summary": "AI is transformative"
           },
           "text": "Based on my understanding, AI is a transformative technology...",
+          "trace": {
+            "llm_calls": [
+              {
+                "duration_ms": 1200,
+                "scope": "agent_1"
+              }
+            ],
+            "mental_models": [
+              {
+                "id": "mm-1",
+                "name": "AI Technology",
+                "subtype": "structural",
+                "type": "concept"
+              }
+            ],
+            "tool_calls": [
+              {
+                "duration_ms": 150,
+                "input": {
+                  "query": "AI"
+                },
+                "tool": "recall"
+              }
+            ]
+          },
           "usage": {
             "input_tokens": 1500,
             "output_tokens": 500,
             "total_tokens": 2000
           }
         }
+      },
+      "ReflectToolCall": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "title": "Tool",
+            "description": "Tool name: lookup, recall, learn, expand"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Input",
+            "description": "Tool input parameters"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output",
+            "description": "Tool output (only included when include.tool_calls.output is true)"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms",
+            "description": "Execution time in milliseconds"
+          },
+          "iteration": {
+            "type": "integer",
+            "title": "Iteration",
+            "description": "Iteration number (1-based) when this tool was called",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool",
+          "input",
+          "duration_ms"
+        ],
+        "title": "ReflectToolCall",
+        "description": "A tool call made during reflect agent execution."
+      },
+      "ReflectTrace": {
+        "properties": {
+          "tool_calls": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectToolCall"
+            },
+            "type": "array",
+            "title": "Tool Calls",
+            "description": "Tool calls made during reflection"
+          },
+          "llm_calls": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectLLMCall"
+            },
+            "type": "array",
+            "title": "Llm Calls",
+            "description": "LLM calls made during reflection"
+          },
+          "mental_models": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectMentalModel"
+            },
+            "type": "array",
+            "title": "Mental Models",
+            "description": "Mental models used during reflection (includes directives with subtype='directive')"
+          }
+        },
+        "type": "object",
+        "title": "ReflectTrace",
+        "description": "Execution trace of LLM and tool calls during reflection."
+      },
+      "ReflectionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReflectionResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ReflectionListResponse",
+        "description": "Response model for listing reflections."
+      },
+      "ReflectionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "bank_id": {
+            "type": "string",
+            "title": "Bank Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source_query": {
+            "type": "string",
+            "title": "Source Query"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "last_refreshed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Refreshed At"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "reflect_response": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reflect Response",
+            "description": "Full reflect API response payload including based_on facts and mental_models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "bank_id",
+          "name",
+          "source_query",
+          "content"
+        ],
+        "title": "ReflectionResponse",
+        "description": "Response model for a reflection."
       },
       "RetainRequest": {
         "properties": {
@@ -4014,6 +5932,89 @@
           "total_tokens": 2000
         }
       },
+      "ToolCallsIncludeOptions": {
+        "properties": {
+          "output": {
+            "type": "boolean",
+            "title": "Output",
+            "description": "Include tool outputs in the trace. Set to false to only include inputs (smaller payload).",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "ToolCallsIncludeOptions",
+        "description": "Options for including tool calls in reflect results."
+      },
+      "UpdateDirectiveRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "New name"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "New content"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority",
+            "description": "New priority"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active",
+            "description": "New active status"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "New tags"
+          }
+        },
+        "type": "object",
+        "title": "UpdateDirectiveRequest",
+        "description": "Request model for updating a directive."
+      },
       "UpdateDispositionRequest": {
         "properties": {
           "disposition": {
@@ -4026,6 +6027,28 @@
         ],
         "title": "UpdateDispositionRequest",
         "description": "Request model for updating disposition traits."
+      },
+      "UpdateReflectionRequest": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "New name for the reflection"
+          }
+        },
+        "type": "object",
+        "title": "UpdateReflectionRequest",
+        "description": "Request model for updating a reflection.",
+        "example": {
+          "name": "Updated Team Communication Preferences"
+        }
       },
       "ValidationError": {
         "properties": {
@@ -4059,6 +6082,34 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VersionResponse": {
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "title": "Api Version",
+            "description": "API version string"
+          },
+          "features": {
+            "$ref": "#/components/schemas/FeaturesInfo",
+            "description": "Enabled feature flags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "api_version",
+          "features"
+        ],
+        "title": "VersionResponse",
+        "description": "Response model for the version/info endpoint.",
+        "example": {
+          "api_version": "1.0.0",
+          "features": {
+            "mcp": true,
+            "mental_models": false,
+            "worker": true
+          }
+        }
       }
     }
   }
