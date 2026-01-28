@@ -24,14 +24,12 @@ from typing_extensions import Self
 
 class ReflectMentalModel(BaseModel):
     """
-    A mental model accessed during reflect.
+    A mental model used during reflect.
     """ # noqa: E501
     id: StrictStr = Field(description="Mental model ID")
-    name: StrictStr = Field(description="Mental model name")
-    type: StrictStr = Field(description="Mental model type: entity, concept, event")
-    subtype: StrictStr = Field(description="Mental model subtype: structural, emergent, learned, directive")
-    observations: Optional[List[StrictStr]] = None
-    __properties: ClassVar[List[str]] = ["id", "name", "type", "subtype", "observations"]
+    text: StrictStr = Field(description="Mental model content")
+    context: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["id", "text", "context"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -72,10 +70,10 @@ class ReflectMentalModel(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # set to None if observations (nullable) is None
+        # set to None if context (nullable) is None
         # and model_fields_set contains the field
-        if self.observations is None and "observations" in self.model_fields_set:
-            _dict['observations'] = None
+        if self.context is None and "context" in self.model_fields_set:
+            _dict['context'] = None
 
         return _dict
 
@@ -90,10 +88,8 @@ class ReflectMentalModel(BaseModel):
 
         _obj = cls.model_validate({
             "id": obj.get("id"),
-            "name": obj.get("name"),
-            "type": obj.get("type"),
-            "subtype": obj.get("subtype"),
-            "observations": obj.get("observations")
+            "text": obj.get("text"),
+            "context": obj.get("context")
         })
         return _obj
 

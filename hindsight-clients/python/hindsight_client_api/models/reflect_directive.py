@@ -18,20 +18,18 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
-from typing_extensions import Annotated
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
-class CreateReflectionRequest(BaseModel):
+class ReflectDirective(BaseModel):
     """
-    Request model for creating a reflection.
+    A directive applied during reflect.
     """ # noqa: E501
-    name: StrictStr = Field(description="Human-readable name for the reflection")
-    source_query: StrictStr = Field(description="The query to run to generate content")
-    tags: Optional[List[StrictStr]] = Field(default=None, description="Tags for scoped visibility")
-    max_tokens: Optional[Annotated[int, Field(le=8192, strict=True, ge=256)]] = Field(default=2048, description="Maximum tokens for generated content")
-    __properties: ClassVar[List[str]] = ["name", "source_query", "tags", "max_tokens"]
+    id: StrictStr = Field(description="Directive ID")
+    name: StrictStr = Field(description="Directive name")
+    content: StrictStr = Field(description="Directive content")
+    __properties: ClassVar[List[str]] = ["id", "name", "content"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -51,7 +49,7 @@ class CreateReflectionRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of CreateReflectionRequest from a JSON string"""
+        """Create an instance of ReflectDirective from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -76,7 +74,7 @@ class CreateReflectionRequest(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of CreateReflectionRequest from a dict"""
+        """Create an instance of ReflectDirective from a dict"""
         if obj is None:
             return None
 
@@ -84,10 +82,9 @@ class CreateReflectionRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
+            "id": obj.get("id"),
             "name": obj.get("name"),
-            "source_query": obj.get("source_query"),
-            "tags": obj.get("tags"),
-            "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else 2048
+            "content": obj.get("content")
         })
         return _obj
 
