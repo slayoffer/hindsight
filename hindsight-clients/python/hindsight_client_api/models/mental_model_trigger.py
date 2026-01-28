@@ -17,17 +17,17 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
-class UpdateReflectionRequest(BaseModel):
+class MentalModelTrigger(BaseModel):
     """
-    Request model for updating a reflection.
+    Trigger settings for a mental model.
     """ # noqa: E501
-    name: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["name"]
+    refresh_after_consolidation: Optional[StrictBool] = Field(default=False, description="If true, refresh this mental model after observations consolidation (real-time mode)")
+    __properties: ClassVar[List[str]] = ["refresh_after_consolidation"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -47,7 +47,7 @@ class UpdateReflectionRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of UpdateReflectionRequest from a JSON string"""
+        """Create an instance of MentalModelTrigger from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -68,16 +68,11 @@ class UpdateReflectionRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # set to None if name (nullable) is None
-        # and model_fields_set contains the field
-        if self.name is None and "name" in self.model_fields_set:
-            _dict['name'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of UpdateReflectionRequest from a dict"""
+        """Create an instance of MentalModelTrigger from a dict"""
         if obj is None:
             return None
 
@@ -85,7 +80,7 @@ class UpdateReflectionRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "name": obj.get("name")
+            "refresh_after_consolidation": obj.get("refresh_after_consolidation") if obj.get("refresh_after_consolidation") is not None else False
         })
         return _obj
 

@@ -17,18 +17,23 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict
-from typing import Any, ClassVar, Dict, List
-from hindsight_client_api.models.reflection_response import ReflectionResponse
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
+from hindsight_client_api.models.mental_model_trigger import MentalModelTrigger
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ReflectionListResponse(BaseModel):
+class CreateMentalModelRequest(BaseModel):
     """
-    Response model for listing reflections.
+    Request model for creating a mental model.
     """ # noqa: E501
-    items: List[ReflectionResponse]
-    __properties: ClassVar[List[str]] = ["items"]
+    name: StrictStr = Field(description="Human-readable name for the mental model")
+    source_query: StrictStr = Field(description="The query to run to generate content")
+    tags: Optional[List[StrictStr]] = Field(default=None, description="Tags for scoped visibility")
+    max_tokens: Optional[Annotated[int, Field(le=8192, strict=True, ge=256)]] = Field(default=2048, description="Maximum tokens for generated content")
+    trigger: Optional[MentalModelTrigger] = Field(default=None, description="Trigger settings")
+    __properties: ClassVar[List[str]] = ["name", "source_query", "tags", "max_tokens", "trigger"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -48,7 +53,7 @@ class ReflectionListResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ReflectionListResponse from a JSON string"""
+        """Create an instance of CreateMentalModelRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -69,18 +74,14 @@ class ReflectionListResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in items (list)
-        _items = []
-        if self.items:
-            for _item_items in self.items:
-                if _item_items:
-                    _items.append(_item_items.to_dict())
-            _dict['items'] = _items
+        # override the default output from pydantic by calling `to_dict()` of trigger
+        if self.trigger:
+            _dict['trigger'] = self.trigger.to_dict()
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ReflectionListResponse from a dict"""
+        """Create an instance of CreateMentalModelRequest from a dict"""
         if obj is None:
             return None
 
@@ -88,7 +89,11 @@ class ReflectionListResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "items": [ReflectionResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
+            "name": obj.get("name"),
+            "source_query": obj.get("source_query"),
+            "tags": obj.get("tags"),
+            "max_tokens": obj.get("max_tokens") if obj.get("max_tokens") is not None else 2048,
+            "trigger": MentalModelTrigger.from_dict(obj["trigger"]) if obj.get("trigger") is not None else None
         })
         return _obj
 

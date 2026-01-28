@@ -2,8 +2,8 @@
 System prompts for the reflect agent.
 
 The reflect agent uses hierarchical retrieval:
-1. search_reflections - User-curated summaries (highest quality)
-2. search_mental_models - Consolidated knowledge with freshness awareness
+1. search_mental_models - User-curated summaries (highest quality)
+2. search_observations - Consolidated knowledge with freshness awareness
 3. recall - Raw facts as ground truth fallback
 """
 
@@ -125,21 +125,23 @@ def build_system_prompt_for_tools(
     bank_profile: dict[str, Any],
     context: str | None = None,
     directives: list[dict[str, Any]] | None = None,
-    has_reflections: bool = False,
+    has_mental_models: bool = False,
+    budget: str | None = None,
 ) -> str:
     """
     Build the system prompt for tool-calling reflect agent.
 
     The agent uses hierarchical retrieval:
-    1. search_reflections - User-curated summaries (try first, if available)
-    2. search_mental_models - Consolidated knowledge with freshness
+    1. search_mental_models - User-curated summaries (try first, if available)
+    2. search_observations - Consolidated knowledge with freshness
     3. recall - Raw facts as ground truth
 
     Args:
         bank_profile: Bank profile with name and mission
         context: Optional additional context
         directives: Optional list of directive mental models to inject as hard rules
-        has_reflections: Whether the bank has any reflections (skip if not)
+        has_mental_models: Whether the bank has any mental models (skip if not)
+        budget: Search depth budget - "low", "mid", or "high". Controls exploration thoroughness.
     """
     name = bank_profile.get("name", "Assistant")
     mission = bank_profile.get("mission", "")
@@ -176,25 +178,25 @@ def build_system_prompt_for_tools(
     )
 
     # Build retrieval levels based on what's available
-    if has_reflections:
+    if has_mental_models:
         parts.extend(
             [
                 "You have access to THREE levels of knowledge. Use them in this order:",
                 "",
-                "### 1. REFLECTIONS (search_reflections) - Try First",
+                "### 1. MENTAL MODELS (search_mental_models) - Try First",
                 "- User-curated summaries about specific topics",
                 "- HIGHEST quality - manually created and maintained",
-                "- If a relevant reflection exists and is FRESH, it may fully answer the question",
+                "- If a relevant mental model exists and is FRESH, it may fully answer the question",
                 "- Check `is_stale` field - if stale, also verify with lower levels",
                 "",
-                "### 2. MENTAL MODELS (search_mental_models) - Second Priority",
+                "### 2. OBSERVATIONS (search_observations) - Second Priority",
                 "- Auto-consolidated knowledge from memories",
                 "- Check `is_stale` field - if stale, ALSO use recall() to verify",
                 "- Good for understanding patterns and summaries",
                 "",
                 "### 3. RAW FACTS (recall) - Ground Truth",
                 "- Individual memories (world facts and experiences)",
-                "- Use when: no reflections/models exist, they're stale, or you need specific details",
+                "- Use when: no mental models/observations exist, they're stale, or you need specific details",
                 "- This is the source of truth that other levels are built from",
                 "",
             ]
@@ -204,15 +206,15 @@ def build_system_prompt_for_tools(
             [
                 "You have access to TWO levels of knowledge. Use them in this order:",
                 "",
-                "### 1. MENTAL MODELS (search_mental_models) - Try First",
+                "### 1. OBSERVATIONS (search_observations) - Try First",
                 "- Auto-consolidated knowledge from memories",
                 "- Check `is_stale` field - if stale, ALSO use recall() to verify",
                 "- Good for understanding patterns and summaries",
                 "",
                 "### 2. RAW FACTS (recall) - Ground Truth",
                 "- Individual memories (world facts and experiences)",
-                "- Use when: no mental models exist, they're stale, or you need specific details",
-                "- This is the source of truth that mental models are built from",
+                "- Use when: no observations exist, they're stale, or you need specific details",
+                "- This is the source of truth that observations are built from",
                 "",
             ]
         )
@@ -230,16 +232,57 @@ def build_system_prompt_for_tools(
             "",
             "Think: What ENTITIES and CONCEPTS does this question involve? Search for each separately.",
             "",
-            "## Workflow",
         ]
     )
 
-    if has_reflections:
+    # Add budget guidance
+    if budget:
+        budget_lower = budget.lower()
+        if budget_lower == "low":
+            parts.extend(
+                [
+                    "## RESEARCH DEPTH: SHALLOW (Quick Response)",
+                    "- Prioritize speed over completeness",
+                    "- If mental models or observations provide a reasonable answer, stop there",
+                    "- Only dig deeper if the initial results are clearly insufficient",
+                    "- Prefer a quick overview rather than exhaustive details",
+                    "- Answer promptly with available information",
+                    "",
+                ]
+            )
+        elif budget_lower == "mid":
+            parts.extend(
+                [
+                    "## RESEARCH DEPTH: MODERATE (Balanced)",
+                    "- Balance thoroughness with efficiency",
+                    "- Check multiple sources when the question warrants it",
+                    "- Verify stale data if it's central to the answer",
+                    "- Don't over-explore, but ensure reasonable coverage",
+                    "",
+                ]
+            )
+        elif budget_lower == "high":
+            parts.extend(
+                [
+                    "## RESEARCH DEPTH: DEEP (Thorough Exploration)",
+                    "- Explore comprehensively before answering",
+                    "- Search across all available knowledge levels",
+                    "- Use multiple query variations to ensure coverage",
+                    "- Verify information across different retrieval levels",
+                    "- Use expand() to get full context on important memories",
+                    "- Take time to synthesize a complete, well-researched answer",
+                    "",
+                ]
+            )
+
+    parts.append("## Workflow")
+
+    if has_mental_models:
         parts.extend(
             [
-                "1. First, try search_reflections() - check if a curated summary exists",
-                "2. If no reflection or it's stale, try search_mental_models() for consolidated knowledge",
-                "3. If mental models are stale OR you need specific details, use recall() for raw facts",
+                "1. First, try search_mental_models() - check if a curated summary exists",
+                "2. If no mental model or it's stale, try search_observations() for consolidated knowledge",
+                "3. If observations are stale OR you need specific details, use recall() for raw facts",
                 "4. Use expand() if you need more context on specific memories",
                 "5. When ready, call done() with your answer and supporting IDs",
             ]
@@ -247,8 +290,8 @@ def build_system_prompt_for_tools(
     else:
         parts.extend(
             [
-                "1. First, try search_mental_models() - check for consolidated knowledge",
-                "2. If mental models are stale OR you need specific details, use recall() for raw facts",
+                "1. First, try search_observations() - check for consolidated knowledge",
+                "2. If observations are stale OR you need specific details, use recall() for raw facts",
                 "3. Use expand() if you need more context on specific memories",
                 "4. When ready, call done() with your answer and supporting IDs",
             ]
@@ -261,7 +304,7 @@ def build_system_prompt_for_tools(
             "Call done() with a plain text 'answer' field.",
             "- Do NOT use markdown formatting",
             "- NEVER include memory IDs, UUIDs, or 'Memory references' in the answer text",
-            "- Put IDs ONLY in the memory_ids/reflection_ids/mental_model_ids arrays, not in the answer",
+            "- Put IDs ONLY in the memory_ids/mental_model_ids/observation_ids arrays, not in the answer",
         ]
     )
 
@@ -356,8 +399,8 @@ def build_agent_prompt(
         parts.append(
             "\n## Instructions\n"
             "Start by searching for relevant information using the hierarchical retrieval strategy:\n"
-            "1. Try search_reflections() first for curated summaries\n"
-            "2. Try search_mental_models() for consolidated knowledge\n"
+            "1. Try search_mental_models() first for curated summaries\n"
+            "2. Try search_observations() for consolidated knowledge\n"
             "3. Use recall() for specific details or to verify stale data"
         )
 

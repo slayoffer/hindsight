@@ -437,57 +437,57 @@ impl ApiClient {
         })
     }
 
-    // --- Reflection Methods ---
+    // --- Mental Model Methods ---
 
-    pub fn list_reflections(&self, bank_id: &str, _verbose: bool) -> Result<types::ReflectionListResponse> {
+    pub fn list_mental_models(&self, bank_id: &str, _verbose: bool) -> Result<types::MentalModelListResponse> {
         self.runtime.block_on(async {
-            let response = self.client.list_reflections(bank_id, None, None, None, None, None).await?;
+            let response = self.client.list_mental_models(bank_id, None, None, None, None, None).await?;
             Ok(response.into_inner())
         })
     }
 
-    pub fn get_reflection(&self, bank_id: &str, reflection_id: &str, _verbose: bool) -> Result<types::ReflectionResponse> {
+    pub fn get_mental_model(&self, bank_id: &str, mental_model_id: &str, _verbose: bool) -> Result<types::MentalModelResponse> {
         self.runtime.block_on(async {
-            let response = self.client.get_reflection(bank_id, reflection_id, None).await?;
+            let response = self.client.get_mental_model(bank_id, mental_model_id, None).await?;
             Ok(response.into_inner())
         })
     }
 
-    pub fn create_reflection(
+    pub fn create_mental_model(
         &self,
         bank_id: &str,
-        request: &types::CreateReflectionRequest,
+        request: &types::CreateMentalModelRequest,
         _verbose: bool,
-    ) -> Result<types::CreateReflectionResponse> {
+    ) -> Result<types::CreateMentalModelResponse> {
         self.runtime.block_on(async {
-            let response = self.client.create_reflection(bank_id, None, request).await?;
+            let response = self.client.create_mental_model(bank_id, None, request).await?;
             Ok(response.into_inner())
         })
     }
 
-    pub fn update_reflection(
+    pub fn update_mental_model(
         &self,
         bank_id: &str,
-        reflection_id: &str,
-        request: &types::UpdateReflectionRequest,
+        mental_model_id: &str,
+        request: &types::UpdateMentalModelRequest,
         _verbose: bool,
-    ) -> Result<types::ReflectionResponse> {
+    ) -> Result<types::MentalModelResponse> {
         self.runtime.block_on(async {
-            let response = self.client.update_reflection(bank_id, reflection_id, None, request).await?;
+            let response = self.client.update_mental_model(bank_id, mental_model_id, None, request).await?;
             Ok(response.into_inner())
         })
     }
 
-    pub fn delete_reflection(&self, bank_id: &str, reflection_id: &str, _verbose: bool) -> Result<serde_json::Value> {
+    pub fn delete_mental_model(&self, bank_id: &str, mental_model_id: &str, _verbose: bool) -> Result<serde_json::Value> {
         self.runtime.block_on(async {
-            let response = self.client.delete_reflection(bank_id, reflection_id, None).await?;
+            let response = self.client.delete_mental_model(bank_id, mental_model_id, None).await?;
             Ok(response.into_inner())
         })
     }
 
-    pub fn refresh_reflection(&self, bank_id: &str, reflection_id: &str, _verbose: bool) -> Result<types::AsyncOperationSubmitResponse> {
+    pub fn refresh_mental_model(&self, bank_id: &str, mental_model_id: &str, _verbose: bool) -> Result<types::AsyncOperationSubmitResponse> {
         self.runtime.block_on(async {
-            let response = self.client.refresh_reflection(bank_id, reflection_id, None).await?;
+            let response = self.client.refresh_mental_model(bank_id, mental_model_id, None).await?;
             Ok(response.into_inner())
         })
     }
@@ -536,6 +536,31 @@ impl ApiClient {
     pub fn delete_directive(&self, bank_id: &str, directive_id: &str, _verbose: bool) -> Result<serde_json::Value> {
         self.runtime.block_on(async {
             let response = self.client.delete_directive(bank_id, directive_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Consolidation Methods ---
+
+    pub fn trigger_consolidation(&self, bank_id: &str, _verbose: bool) -> Result<types::ConsolidationResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.trigger_consolidation(bank_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    pub fn clear_observations(&self, bank_id: &str, _verbose: bool) -> Result<types::DeleteResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.clear_observations(bank_id, None).await?;
+            Ok(response.into_inner())
+        })
+    }
+
+    // --- Version Methods ---
+
+    pub fn get_version(&self, _verbose: bool) -> Result<types::VersionResponse> {
+        self.runtime.block_on(async {
+            let response = self.client.get_version().await?;
             Ok(response.into_inner())
         })
     }

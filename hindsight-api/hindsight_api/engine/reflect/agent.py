@@ -2,8 +2,8 @@
 Reflect agent - agentic loop for reflection with native tool calling.
 
 Uses hierarchical retrieval:
-1. search_reflections - User-curated summaries (highest quality)
-2. search_mental_models - Consolidated knowledge with freshness
+1. search_mental_models - User-curated summaries (highest quality)
+2. search_observations - Consolidated knowledge with freshness
 3. recall - Raw facts as ground truth
 """
 
@@ -20,7 +20,12 @@ from .tools_schema import get_reflect_tools
 
 
 def _build_directives_applied(directives: list[dict[str, Any]] | None) -> list[DirectiveInfo]:
-    """Build list of DirectiveInfo from directive mental models."""
+    """Build list of DirectiveInfo from directive mental models.
+
+    Handles multiple directive formats:
+    1. New format: directives have direct 'content' field
+    2. Fallback: directives have 'description' field
+    """
     if not directives:
         return []
 
@@ -28,17 +33,11 @@ def _build_directives_applied(directives: list[dict[str, Any]] | None) -> list[D
     for directive in directives:
         directive_id = directive.get("id", "")
         directive_name = directive.get("name", "")
-        observations = directive.get("observations", [])
 
-        rules = []
-        for obs in observations:
-            # Support both Pydantic Observation objects and dicts
-            if hasattr(obs, "content"):
-                rules.append(obs.content)
-            elif isinstance(obs, dict) and obs.get("content"):
-                rules.append(obs["content"])
+        # Get content from 'content' field or fallback to 'description'
+        content = directive.get("content", "") or directive.get("description", "")
 
-        result.append(DirectiveInfo(id=directive_id, name=directive_name, rules=rules))
+        result.append(DirectiveInfo(id=directive_id, name=directive_name, content=content))
 
     return result
 
@@ -202,8 +201,8 @@ async def run_reflect_agent(
     bank_id: str,
     query: str,
     bank_profile: dict[str, Any],
-    search_reflections_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     search_mental_models_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
+    search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     recall_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
     context: str | None = None,
@@ -211,13 +210,15 @@ async def run_reflect_agent(
     max_tokens: int | None = None,
     response_schema: dict | None = None,
     directives: list[dict[str, Any]] | None = None,
+    has_mental_models: bool = False,
+    budget: str | None = None,
 ) -> ReflectAgentResult:
     """
     Execute the reflect agent loop using native tool calling.
 
     The agent uses hierarchical retrieval:
-    1. search_reflections - User-curated summaries (try first)
-    2. search_mental_models - Consolidated knowledge with freshness
+    1. search_mental_models - User-curated summaries (try first)
+    2. search_observations - Consolidated knowledge with freshness
     3. recall - Raw facts as ground truth
 
     Args:
@@ -225,8 +226,8 @@ async def run_reflect_agent(
         bank_id: Bank identifier
         query: Question to answer
         bank_profile: Bank profile with name and mission
-        search_reflections_fn: Tool callback for searching reflections (query, max_results) -> result
         search_mental_models_fn: Tool callback for searching mental models (query, max_results) -> result
+        search_observations_fn: Tool callback for searching observations (query, max_results) -> result
         recall_fn: Tool callback for recall (query, max_tokens) -> result
         expand_fn: Tool callback for expand (memory_ids, depth) -> result
         context: Optional additional context
@@ -251,7 +252,9 @@ async def run_reflect_agent(
     tools = get_reflect_tools(directive_rules=directive_rules)
 
     # Build initial messages (directives are injected into system prompt at START and END)
-    system_prompt = build_system_prompt_for_tools(bank_profile, context, directives=directives)
+    system_prompt = build_system_prompt_for_tools(
+        bank_profile, context, directives=directives, has_mental_models=has_mental_models, budget=budget
+    )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": query},
@@ -270,8 +273,8 @@ async def run_reflect_agent(
 
     # Track available IDs for validation (prevents hallucinated citations)
     available_memory_ids: set[str] = set()
-    available_reflection_ids: set[str] = set()
     available_mental_model_ids: set[str] = set()
+    available_observation_ids: set[str] = set()
 
     def _get_llm_trace() -> list[LLMCall]:
         return [
@@ -394,7 +397,7 @@ async def run_reflect_agent(
             llm_trace.append({"scope": f"agent_{iteration + 1}_err", "duration_ms": err_duration})
             # Guardrail: If no evidence gathered yet, retry
             has_gathered_evidence = (
-                bool(available_memory_ids) or bool(available_reflection_ids) or bool(available_mental_model_ids)
+                bool(available_memory_ids) or bool(available_mental_model_ids) or bool(available_observation_ids)
             )
             if not has_gathered_evidence and iteration < max_iterations - 1:
                 continue
@@ -519,7 +522,7 @@ async def run_reflect_agent(
         if done_call:
             # Guardrail: Require evidence before done
             has_gathered_evidence = (
-                bool(available_memory_ids) or bool(available_reflection_ids) or bool(available_mental_model_ids)
+                bool(available_memory_ids) or bool(available_mental_model_ids) or bool(available_observation_ids)
             )
             if not has_gathered_evidence and iteration < max_iterations - 1:
                 # Add assistant message and fake tool result asking for evidence
@@ -536,7 +539,7 @@ async def run_reflect_agent(
                         "name": done_call.name,  # Required by Gemini
                         "content": json.dumps(
                             {
-                                "error": "You must search for information first. Use search_reflections(), search_mental_models(), or recall() before providing your final answer."
+                                "error": "You must search for information first. Use search_mental_models(), search_observations(), or recall() before providing your final answer."
                             }
                         ),
                     }
@@ -547,8 +550,8 @@ async def run_reflect_agent(
             return await _process_done_tool(
                 done_call,
                 available_memory_ids,
-                available_reflection_ids,
                 available_mental_model_ids,
+                available_observation_ids,
                 iteration + 1,
                 total_tools_called,
                 tool_trace,
@@ -576,8 +579,8 @@ async def run_reflect_agent(
             tool_tasks = [
                 _execute_tool_with_timing(
                     tc,
-                    search_reflections_fn,
                     search_mental_models_fn,
+                    search_observations_fn,
                     recall_fn,
                     expand_fn,
                 )
@@ -607,15 +610,6 @@ async def run_reflect_agent(
 
                 # Track available IDs from tool results (only for successful responses)
                 if (
-                    normalized_tool_name == "search_reflections"
-                    and isinstance(output, dict)
-                    and "reflections" in output
-                ):
-                    for reflection in output["reflections"]:
-                        if "id" in reflection:
-                            available_reflection_ids.add(reflection["id"])
-
-                if (
                     normalized_tool_name == "search_mental_models"
                     and isinstance(output, dict)
                     and "mental_models" in output
@@ -623,6 +617,15 @@ async def run_reflect_agent(
                     for mm in output["mental_models"]:
                         if "id" in mm:
                             available_mental_model_ids.add(mm["id"])
+
+                if (
+                    normalized_tool_name == "search_observations"
+                    and isinstance(output, dict)
+                    and "observations" in output
+                ):
+                    for obs in output["observations"]:
+                        if "id" in obs:
+                            available_observation_ids.add(obs["id"])
 
                 if normalized_tool_name == "recall" and isinstance(output, dict) and "memories" in output:
                     for memory in output["memories"]:
@@ -643,9 +646,17 @@ async def run_reflect_agent(
                 input_dict = {"tool": tc.name, **tc.arguments}
                 input_summary = _summarize_input(tc.name, tc.arguments)
 
+                # Extract reason from tool arguments (if provided)
+                tool_reason = tc.arguments.get("reason")
+
                 tool_trace.append(
                     ToolCall(
-                        tool=tc.name, input=input_dict, output=output, duration_ms=duration_ms, iteration=iteration + 1
+                        tool=tc.name,
+                        reason=tool_reason,
+                        input=input_dict,
+                        output=output,
+                        duration_ms=duration_ms,
+                        iteration=iteration + 1,
                     )
                 )
 
@@ -695,8 +706,8 @@ def _tool_call_to_dict(tc: "LLMToolCall") -> dict[str, Any]:
 async def _process_done_tool(
     done_call: "LLMToolCall",
     available_memory_ids: set[str],
-    available_reflection_ids: set[str],
     available_mental_model_ids: set[str],
+    available_observation_ids: set[str],
     iterations: int,
     total_tools_called: int,
     tool_trace: list[ToolCall],
@@ -717,8 +728,8 @@ async def _process_done_tool(
 
     # Validate IDs (only include IDs that were actually retrieved)
     used_memory_ids = [mid for mid in args.get("memory_ids", []) if mid in available_memory_ids]
-    used_reflection_ids = [rid for rid in args.get("reflection_ids", []) if rid in available_reflection_ids]
     used_mental_model_ids = [mid for mid in args.get("mental_model_ids", []) if mid in available_mental_model_ids]
+    used_observation_ids = [oid for oid in args.get("observation_ids", []) if oid in available_observation_ids]
 
     # Generate structured output if schema provided
     structured_output = None
@@ -744,16 +755,16 @@ async def _process_done_tool(
         llm_trace=llm_trace,
         usage=final_usage,
         used_memory_ids=used_memory_ids,
-        used_reflection_ids=used_reflection_ids,
         used_mental_model_ids=used_mental_model_ids,
+        used_observation_ids=used_observation_ids,
         directives_applied=directives_applied,
     )
 
 
 async def _execute_tool_with_timing(
     tc: "LLMToolCall",
-    search_reflections_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     search_mental_models_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
+    search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     recall_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
 ) -> tuple[dict[str, Any], int]:
@@ -762,8 +773,8 @@ async def _execute_tool_with_timing(
     result = await _execute_tool(
         tc.name,
         tc.arguments,
-        search_reflections_fn,
         search_mental_models_fn,
+        search_observations_fn,
         recall_fn,
         expand_fn,
     )
@@ -774,8 +785,8 @@ async def _execute_tool_with_timing(
 async def _execute_tool(
     tool_name: str,
     args: dict[str, Any],
-    search_reflections_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     search_mental_models_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
+    search_observations_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     recall_fn: Callable[[str, int], Awaitable[dict[str, Any]]],
     expand_fn: Callable[[list[str], str], Awaitable[dict[str, Any]]],
 ) -> dict[str, Any]:
@@ -783,19 +794,19 @@ async def _execute_tool(
     # Normalize tool name for various LLM output formats
     tool_name = _normalize_tool_name(tool_name)
 
-    if tool_name == "search_reflections":
-        query = args.get("query")
-        if not query:
-            return {"error": "search_reflections requires a query parameter"}
-        max_results = args.get("max_results") or 5
-        return await search_reflections_fn(query, max_results)
-
-    elif tool_name == "search_mental_models":
+    if tool_name == "search_mental_models":
         query = args.get("query")
         if not query:
             return {"error": "search_mental_models requires a query parameter"}
+        max_results = args.get("max_results") or 5
+        return await search_mental_models_fn(query, max_results)
+
+    elif tool_name == "search_observations":
+        query = args.get("query")
+        if not query:
+            return {"error": "search_observations requires a query parameter"}
         max_tokens = max(args.get("max_tokens") or 5000, 1000)  # Default 5000, min 1000
-        return await search_mental_models_fn(query, max_tokens)
+        return await search_observations_fn(query, max_tokens)
 
     elif tool_name == "recall":
         query = args.get("query")
@@ -817,12 +828,12 @@ async def _execute_tool(
 
 def _summarize_input(tool_name: str, args: dict[str, Any]) -> str:
     """Create a summary of tool input for logging, showing all params."""
-    if tool_name == "search_reflections":
+    if tool_name == "search_mental_models":
         query = args.get("query", "")
         query_preview = f"'{query[:30]}...'" if len(query) > 30 else f"'{query}'"
         max_results = args.get("max_results") or 5
         return f"(query={query_preview}, max_results={max_results})"
-    elif tool_name == "search_mental_models":
+    elif tool_name == "search_observations":
         query = args.get("query", "")
         query_preview = f"'{query[:30]}...'" if len(query) > 30 else f"'{query}'"
         max_tokens = max(args.get("max_tokens") or 5000, 1000)
@@ -841,9 +852,9 @@ def _summarize_input(tool_name: str, args: dict[str, Any]) -> str:
         answer = args.get("answer", "")
         answer_preview = f"'{answer[:30]}...'" if len(answer) > 30 else f"'{answer}'"
         memory_ids = args.get("memory_ids", [])
-        reflection_ids = args.get("reflection_ids", [])
         mental_model_ids = args.get("mental_model_ids", [])
+        observation_ids = args.get("observation_ids", [])
         return (
-            f"(answer={answer_preview}, mem={len(memory_ids)}, ref={len(reflection_ids)}, mm={len(mental_model_ids)})"
+            f"(answer={answer_preview}, mem={len(memory_ids)}, mm={len(mental_model_ids)}, obs={len(observation_ids)})"
         )
     return str(args)
