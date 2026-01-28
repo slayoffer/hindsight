@@ -318,7 +318,9 @@ def ensure_embedding_dimension(
 
         # Check if table has data
         row_count = conn.execute(
-            text(f"SELECT COUNT(*) FROM {schema_name}.memory_units WHERE embedding IS NOT NULL")  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
+            text(
+                f"SELECT COUNT(*) FROM {schema_name}.memory_units WHERE embedding IS NOT NULL"
+            )  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         ).scalar()
 
         if row_count > 0:
@@ -356,7 +358,9 @@ def ensure_embedding_dimension(
 
         # Alter the column type
         conn.execute(
-            text(f"ALTER TABLE {schema_name}.memory_units ALTER COLUMN embedding TYPE vector({required_dimension})")  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
+            text(
+                f"ALTER TABLE {schema_name}.memory_units ALTER COLUMN embedding TYPE vector({required_dimension})"
+            )  # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         )
         conn.commit()
 
