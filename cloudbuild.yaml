@@ -1,0 +1,65 @@
+# Cloud Build config for Hindsight
+# Builds Docker image, pushes to Artifact Registry, and deploys to GKE
+#
+# Supports: prod (main branch) and dev (develop branch)
+#
+# Substitutions:
+#   _ENV: prod or dev
+#   _IMAGE_TAG: latest, beta, or commit SHA
+#   _NAMESPACE: hindsight or hindsight-dev
+#
+# Usage (from GHA):
+#   gcloud builds submit --config=cloudbuild.yaml \
+#     --worker-pool=projects/xsolla-n8n-prod/locations/us-west2/workerPools/hindsight-deploy \
+#     --substitutions=_ENV=prod,_IMAGE_TAG=latest,_NAMESPACE=hindsight
+
+steps:
+  # Build Docker image with all build args
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:${_IMAGE_TAG}'
+      - '-t'
+      - 'us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:${COMMIT_SHA}'
+      - '-f'
+      - 'docker/standalone/Dockerfile'
+      - '--build-arg'
+      - 'INCLUDE_API=true'
+      - '--build-arg'
+      - 'INCLUDE_CP=true'
+      - '--build-arg'
+      - 'INCLUDE_LOCAL_MODELS=true'
+      - '--build-arg'
+      - 'PRELOAD_ML_MODELS=true'
+      - '.'
+
+  # Push all tags to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push'
+    args: ['push', '--all-tags', 'us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight']
+
+  # Deploy to GKE - restart deployment to pull new image
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    id: 'deploy'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud container clusters get-credentials gcp-k8s-xsolla-n8n-prod --region=us-west2 --project=xsolla-n8n-prod
+        kubectl rollout restart deployment/hindsight-current -n ${_NAMESPACE}
+        kubectl rollout status deployment/hindsight-current -n ${_NAMESPACE} --timeout=300s
+
+serviceAccount: 'hindsight-github-actions@xsolla-n8n-prod.iam.gserviceaccount.com'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'  # Faster builds for large image
+
+timeout: '3600s'  # 60 minutes for large image
+
+substitutions:
+  _ENV: 'prod'
+  _IMAGE_TAG: 'latest'
+  _NAMESPACE: 'hindsight'
