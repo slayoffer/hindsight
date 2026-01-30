@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Synced with upstream v0.4.2 (12 commits merged)
+  - Vertex AI as LLM provider
+  - Per-operation LLM retry/backoff configuration
+  - Moltbot (Claude Code) integration
+  - Consolidation performance benchmark and timing breakdown
+  - Worker poller hardening for tenant schemas
+  - hindsight-embed macOS crash fix
+  - /version endpoint fix
+- CLI: `--wait` flag for `bank consolidate` to poll for completion
+- CLI: `--poll-interval` option for consolidate (default 10s)
+- CLI: `--date` filter for `document list` (yesterday/today/YYYY-MM-DD/all)
+
 ### Changed
 - Merged 4 hindsight skills into 1 unified skill (515 → 249 lines)
   - Combined dev guidance + memory usage (local/cloud/self-hosted)
