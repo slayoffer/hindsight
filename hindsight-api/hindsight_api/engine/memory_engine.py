@@ -788,7 +788,7 @@ class MemoryEngine(MemoryEngineInterface):
                 kwargs = {"name": self._pg0_instance_name}
                 if self._pg0_port is not None:
                     kwargs["port"] = self._pg0_port
-                pg0 = EmbeddedPostgres(**kwargs)  # type: ignore[invalid-argument-type] - dict kwargs
+                pg0 = EmbeddedPostgres(**kwargs)
                 # Check if pg0 is already running before we start it
                 was_already_running = await pg0.is_running()
                 self.db_url = await pg0.ensure_running()
@@ -887,6 +887,23 @@ class MemoryEngine(MemoryEngineInterface):
             logger.info("Running database migrations...")
             # Use configured database schema for migrations (defaults to "public")
             run_migrations(self.db_url, schema=get_config().database_schema)
+
+            # Migrate all existing tenant schemas (if multi-tenant)
+            if self._tenant_extension is not None:
+                try:
+                    tenants = await self._tenant_extension.list_tenants()
+                    if tenants:
+                        logger.info(f"Running migrations on {len(tenants)} tenant schemas...")
+                        for tenant in tenants:
+                            schema = tenant.schema
+                            if schema and schema != "public":
+                                try:
+                                    run_migrations(self.db_url, schema=schema)
+                                except Exception as e:
+                                    logger.warning(f"Failed to migrate tenant schema {schema}: {e}")
+                        logger.info("Tenant schema migrations completed")
+                except Exception as e:
+                    logger.warning(f"Failed to run tenant schema migrations: {e}")
 
             # Ensure embedding column dimension matches the model's dimension
             # This is done after migrations and after embeddings.initialize()
@@ -1182,7 +1199,7 @@ class MemoryEngine(MemoryEngineInterface):
             List of created unit IDs
         """
         # Build content dict
-        content_dict: RetainContentDict = {"content": content, "context": context}  # type: ignore[typeddict-item] - building incrementally
+        content_dict: RetainContentDict = {"content": content, "context": context}
         if event_date:
             content_dict["event_date"] = event_date
         if document_id:
