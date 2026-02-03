@@ -42,6 +42,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Display Build Info
+        run: |
+          echo "============================================="
+          echo "Building Hindsight Docker Image"
+          echo "============================================="
+          echo "Commit:    ${{ github.sha }}"
+          echo "Branch:    ${{ github.ref_name }}"
+          echo "Registry:  us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight"
+          echo ""
+          echo "Image tags to be built:"
+          echo "  - us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:latest"
+          echo "  - us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:${{ github.sha }}"
+          echo "============================================="
+
       - name: Build and Push via Cloud Build
         run: |
           cat > /tmp/cloudbuild.yaml <<'EOF'
@@ -78,6 +92,26 @@ jobs:
             --worker-pool=projects/xsolla-n8n-prod/locations/us-west2/workerPools/hindsight-deploy \
             --config=/tmp/cloudbuild.yaml \
             --substitutions=COMMIT_SHA=${{ github.sha }}
+
+      - name: Verify Pushed Images
+        run: |
+          echo "============================================="
+          echo "Verifying pushed images in Artifact Registry"
+          echo "============================================="
+          echo ""
+          echo "Latest tags for hindsight:"
+          gcloud artifacts docker images list \
+            us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight \
+            --include-tags \
+            --sort-by=~UPDATE_TIME \
+            --limit=5 \
+            --format="table(package,tags,createTime.date('%Y-%m-%d %H:%M:%S'))"
+          echo ""
+          echo "Image digest for commit ${{ github.sha }}:"
+          gcloud artifacts docker images describe \
+            us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:${{ github.sha }} \
+            --format="value(image_summary.digest)" 2>/dev/null || echo "Tag verification pending..."
+          echo "============================================="
 
   deploy:
     needs: build
