@@ -133,20 +133,39 @@ jobs:
 
       - name: Deploy to GKE via Cloud Build (Connect Gateway)
         run: |
-          cat > /tmp/deploy.yaml <<'EOF'
+          cat > /tmp/deploy.yaml <<EOF
           steps:
             - name: 'gcr.io/cloud-builders/gcloud'
               entrypoint: 'bash'
               args:
                 - '-c'
                 - |
+                  set -e
+                  echo "============================================="
+                  echo "Deploying Hindsight to GKE"
+                  echo "============================================="
+                  echo "Commit: $COMMIT_SHA"
+                  echo "Expected image tag: us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:\$COMMIT_SHA"
+                  echo ""
+
                   # Use Connect Gateway (Fleet) to access private GKE cluster
                   gcloud container fleet memberships get-credentials gcp-k8s-xsolla-n8n-prod --project=xsolla-n8n-prod
+
+                  echo "Restarting deployment..."
                   kubectl rollout restart deployment/hindsight-current -n hindsight
                   kubectl rollout status deployment/hindsight-current -n hindsight --timeout=300s
+
+                  echo ""
+                  echo "============================================="
+                  echo "Deployment Verification"
+                  echo "============================================="
+                  echo "Running pod image:"
+                  kubectl get pods -n hindsight -l app=hindsight-current -o jsonpath='{range .items[*]}Pod: {.metadata.name}{"\n"}Image: {.status.containerStatuses[0].image}{"\n"}ImageID: {.status.containerStatuses[0].imageID}{"\n"}{end}'
+                  echo ""
+                  echo "============================================="
           serviceAccount: 'projects/xsolla-n8n-prod/serviceAccounts/hindsight-github-actions@xsolla-n8n-prod.iam.gserviceaccount.com'
-          options:
-            logging: CLOUD_LOGGING_ONLY
+          substitutions:
+            COMMIT_SHA: ${{ github.sha }}
           EOF
 
           gcloud builds submit --no-source \
