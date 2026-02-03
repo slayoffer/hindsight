@@ -35,6 +35,8 @@ export interface PluginConfig {
   llmProvider?: string; // LLM provider override (e.g. 'openai', 'anthropic', 'gemini', 'groq', 'ollama')
   llmModel?: string; // LLM model override (e.g. 'gpt-4o-mini', 'claude-3-5-haiku-20241022')
   llmApiKeyEnv?: string; // Env var name holding the API key (e.g. 'MY_CUSTOM_KEY')
+  hindsightApiUrl?: string; // External Hindsight API URL (skips local daemon when set)
+  hindsightApiToken?: string; // API token for external Hindsight API authentication
 }
 
 export interface ServiceConfig {
