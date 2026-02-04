@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type {
@@ -10,18 +9,63 @@ import type {
 
 const execAsync = promisify(exec);
 
+/**
+ * Escape a string for use as a single-quoted shell argument.
+ *
+ * In POSIX shells, single-quoted strings treat ALL characters literally
+ * except for the single quote itself. To include a literal single quote,
+ * we use the pattern: end quote + escaped quote + start quote = '\''
+ *
+ * Example: "It's $100" becomes 'It'\''s $100'
+ * Shell interprets: 'It' + \' + 's $100' = It's $100
+ *
+ * This handles ALL shell-special characters including:
+ * - $ (variable expansion)
+ * - ` (command substitution)
+ * - ! (history expansion)
+ * - ? * [ ] (glob patterns)
+ * - ( ) { } (subshell/brace expansion)
+ * - < > | & ; (redirection/control)
+ * - \ " # ~ newlines
+ *
+ * @param arg - The string to escape
+ * @returns The escaped string (without surrounding quotes - caller adds those)
+ */
+export function escapeShellArg(arg: string): string {
+  // Replace single quotes with the escape sequence: '\''
+  // This ends the current single-quoted string, adds an escaped literal quote,
+  // and starts a new single-quoted string.
+  return arg.replace(/'/g, "'\\''");
+}
+
 export class HindsightClient {
   private bankId: string = 'default'; // Always use default bank
   private llmProvider: string;
   private llmApiKey: string;
   private llmModel?: string;
   private embedVersion: string;
+  private embedPackagePath?: string;
 
-  constructor(llmProvider: string, llmApiKey: string, llmModel?: string, embedVersion: string = 'latest') {
+  constructor(llmProvider: string, llmApiKey: string, llmModel?: string, embedVersion: string = 'latest', embedPackagePath?: string) {
     this.llmProvider = llmProvider;
     this.llmApiKey = llmApiKey;
     this.llmModel = llmModel;
     this.embedVersion = embedVersion || 'latest';
+    this.embedPackagePath = embedPackagePath;
+  }
+
+  /**
+   * Get the command prefix to run hindsight-embed (either local or from PyPI)
+   */
+  private getEmbedCommandPrefix(): string {
+    if (this.embedPackagePath) {
+      // Local package: uv run --directory <path> hindsight-embed
+      return `uv run --directory ${this.embedPackagePath} hindsight-embed`;
+    } else {
+      // PyPI package: uvx hindsight-embed@version
+      const embedPackage = this.embedVersion ? `hindsight-embed@${this.embedVersion}` : 'hindsight-embed@latest';
+      return `uvx ${embedPackage}`;
+    }
   }
 
   setBankId(bankId: string): void {
@@ -33,12 +77,12 @@ export class HindsightClient {
       return;
     }
 
-    const escapedMission = mission.replace(/'/g, "'\\''"); // Escape single quotes
-    const embedPackage = this.embedVersion ? `hindsight-embed@${this.embedVersion}` : 'hindsight-embed@latest';
-    const cmd = `uvx ${embedPackage} bank mission ${this.bankId} '${escapedMission}'`;
+    const escapedMission = escapeShellArg(mission);
+    const embedCmd = this.getEmbedCommandPrefix();
+    const cmd = `${embedCmd} --profile openclaw bank mission ${this.bankId} '${escapedMission}'`;
 
     try {
-      const { stdout } = await execAsync(cmd, { env: this.getEnv() });
+      const { stdout } = await execAsync(cmd);
       console.log(`[Hindsight] Bank mission set: ${stdout.trim()}`);
     } catch (error) {
       // Don't fail if mission set fails - bank might not exist yet, will be created on first retain
@@ -46,29 +90,15 @@ export class HindsightClient {
     }
   }
 
-  private getEnv(): Record<string, string> {
-    const env: Record<string, string> = {
-      ...process.env,
-      HINDSIGHT_EMBED_LLM_PROVIDER: this.llmProvider,
-      HINDSIGHT_EMBED_LLM_API_KEY: this.llmApiKey,
-    };
-
-    if (this.llmModel) {
-      env.HINDSIGHT_EMBED_LLM_MODEL = this.llmModel;
-    }
-
-    return env;
-  }
-
   async retain(request: RetainRequest): Promise<RetainResponse> {
-    const content = request.content.replace(/'/g, "'\\''"); // Escape single quotes
-    const docId = request.document_id || 'conversation';
+    const content = escapeShellArg(request.content);
+    const docId = escapeShellArg(request.document_id || 'conversation');
 
-    const embedPackage = this.embedVersion ? `hindsight-embed@${this.embedVersion}` : 'hindsight-embed@latest';
-    const cmd = `uvx ${embedPackage} memory retain ${this.bankId} '${content}' --doc-id '${docId}' --async`;
+    const embedCmd = this.getEmbedCommandPrefix();
+    const cmd = `${embedCmd} --profile openclaw memory retain ${this.bankId} '${content}' --doc-id '${docId}' --async`;
 
     try {
-      const { stdout } = await execAsync(cmd, { env: this.getEnv() });
+      const { stdout } = await execAsync(cmd);
       console.log(`[Hindsight] Retained (async): ${stdout.trim()}`);
 
       // Return a simple response
@@ -83,14 +113,14 @@ export class HindsightClient {
   }
 
   async recall(request: RecallRequest): Promise<RecallResponse> {
-    const query = request.query.replace(/'/g, "'\\''"); // Escape single quotes
+    const query = escapeShellArg(request.query);
     const maxTokens = request.max_tokens || 1024;
 
-    const embedPackage = this.embedVersion ? `hindsight-embed@${this.embedVersion}` : 'hindsight-embed@latest';
-    const cmd = `uvx ${embedPackage} memory recall ${this.bankId} '${query}' --output json --max-tokens ${maxTokens}`;
+    const embedCmd = this.getEmbedCommandPrefix();
+    const cmd = `${embedCmd} --profile openclaw memory recall ${this.bankId} '${query}' --output json --max-tokens ${maxTokens}`;
 
     try {
-      const { stdout } = await execAsync(cmd, { env: this.getEnv() });
+      const { stdout } = await execAsync(cmd);
 
       // Parse JSON output - returns { entities: {...}, results: [...] }
       const response = JSON.parse(stdout);

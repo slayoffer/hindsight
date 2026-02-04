@@ -42,6 +42,20 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Display Build Info
+        run: |
+          echo "============================================="
+          echo "Building Hindsight Docker Image"
+          echo "============================================="
+          echo "Commit:    ${{ github.sha }}"
+          echo "Branch:    ${{ github.ref_name }}"
+          echo "Registry:  us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight"
+          echo ""
+          echo "Image tags to be built:"
+          echo "  - us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:latest"
+          echo "  - us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:${{ github.sha }}"
+          echo "============================================="
+
       - name: Build and Push via Cloud Build
         run: |
           cat > /tmp/cloudbuild.yaml <<'EOF'
@@ -79,6 +93,26 @@ jobs:
             --config=/tmp/cloudbuild.yaml \
             --substitutions=COMMIT_SHA=${{ github.sha }}
 
+      - name: Verify Pushed Images
+        run: |
+          echo "============================================="
+          echo "Verifying pushed images in Artifact Registry"
+          echo "============================================="
+          echo ""
+          echo "Latest tags for hindsight:"
+          gcloud artifacts docker images list \
+            us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight \
+            --include-tags \
+            --sort-by=~UPDATE_TIME \
+            --limit=5 \
+            --format="table(package,tags,createTime.date('%Y-%m-%d %H:%M:%S'))"
+          echo ""
+          echo "Image digest for commit ${{ github.sha }}:"
+          gcloud artifacts docker images describe \
+            us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:${{ github.sha }} \
+            --format="value(image_summary.digest)" 2>/dev/null || echo "Tag verification pending..."
+          echo "============================================="
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -97,22 +131,58 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Display Deploy Info
+        run: |
+          echo "============================================="
+          echo "Deploying Hindsight to GKE (PROD)"
+          echo "============================================="
+          echo "Commit:    ${{ github.sha }}"
+          echo "Namespace: hindsight"
+          echo "Image tag: latest"
+          echo ""
+          echo "Expected image digest:"
+          gcloud artifacts docker images describe \
+            us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:latest \
+            --format="value(image_summary.fully_qualified_digest)" || echo "Could not fetch digest"
+          echo "============================================="
+
       - name: Deploy to GKE via Cloud Build (Connect Gateway)
         run: |
-          cat > /tmp/deploy.yaml <<'EOF'
+          cat > /tmp/deploy.yaml <<EOF
           steps:
             - name: 'gcr.io/cloud-builders/gcloud'
               entrypoint: 'bash'
               args:
                 - '-c'
                 - |
+                  set -e
+                  echo "============================================="
+                  echo "Deploying Hindsight to GKE"
+                  echo "============================================="
+                  echo "Commit: $_COMMIT_SHA"
+                  echo "Expected image tag: us-docker.pkg.dev/xsolla-n8n-prod/hindsight/hindsight:\$_COMMIT_SHA"
+                  echo ""
+
                   # Use Connect Gateway (Fleet) to access private GKE cluster
                   gcloud container fleet memberships get-credentials gcp-k8s-xsolla-n8n-prod --project=xsolla-n8n-prod
+
+                  echo "Restarting deployment..."
                   kubectl rollout restart deployment/hindsight-current -n hindsight
                   kubectl rollout status deployment/hindsight-current -n hindsight --timeout=300s
+
+                  echo ""
+                  echo "============================================="
+                  echo "Deployment Verification"
+                  echo "============================================="
+                  echo "Running pod image:"
+                  kubectl get pods -n hindsight -l app=hindsight-current -o jsonpath='{range .items[*]}Pod: {.metadata.name}{"\n"}Image: {.status.containerStatuses[0].image}{"\n"}ImageID: {.status.containerStatuses[0].imageID}{"\n"}{end}'
+                  echo ""
+                  echo "============================================="
           serviceAccount: 'projects/xsolla-n8n-prod/serviceAccounts/hindsight-github-actions@xsolla-n8n-prod.iam.gserviceaccount.com'
           options:
             logging: CLOUD_LOGGING_ONLY
+          substitutions:
+            _COMMIT_SHA: ${{ github.sha }}
           EOF
 
           gcloud builds submit --no-source \

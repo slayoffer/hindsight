@@ -20,14 +20,13 @@ import warnings
 
 import uvicorn
 
-from . import MemoryEngine
+from . import MemoryEngine, __version__
 from .api import create_app
 from .banner import print_banner
 from .config import DEFAULT_WORKERS, ENV_WORKERS, HindsightConfig, get_config
 from .daemon import (
     DEFAULT_DAEMON_PORT,
     DEFAULT_IDLE_TIMEOUT,
-    DaemonLock,
     IdleTimeoutMiddleware,
     daemonize,
 )
@@ -136,29 +135,14 @@ def main():
 
     # Daemon mode handling
     if args.daemon:
-        # Use fixed daemon port
-        args.port = DEFAULT_DAEMON_PORT
+        # Use port from args (may be custom for profiles)
+        if args.port == config.port:  # No custom port specified
+            args.port = DEFAULT_DAEMON_PORT
         args.host = "127.0.0.1"  # Only bind to localhost for security
 
-        # Check if another daemon is already running
-        daemon_lock = DaemonLock()
-        if not daemon_lock.acquire():
-            print(f"Daemon already running (PID: {daemon_lock.get_pid()})", file=sys.stderr)
-            sys.exit(1)
-
         # Fork into background
+        # No lockfile needed - port binding prevents duplicate daemons
         daemonize()
-
-        # Re-acquire lock in child process
-        daemon_lock = DaemonLock()
-        if not daemon_lock.acquire():
-            sys.exit(1)
-
-        # Register cleanup to release lock
-        def release_lock():
-            daemon_lock.release()
-
-        atexit.register(release_lock)
 
     # Print banner (not in daemon mode)
     if not args.daemon:
@@ -362,6 +346,7 @@ def main():
             embeddings_provider=config.embeddings_provider,
             reranker_provider=config.reranker_provider,
             mcp_enabled=config.mcp_enabled,
+            version=__version__,
         )
 
     # Start idle checker in daemon mode
