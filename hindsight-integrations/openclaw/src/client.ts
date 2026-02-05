@@ -62,10 +62,9 @@ export class HindsightClient {
       // Local package: uv run --directory <path> hindsight-embed
       return `uv run --directory ${this.embedPackagePath} hindsight-embed`;
     } else {
-      // Use pre-installed hindsight-embed if available in PATH (from uv tool install)
-      // This avoids uvx which creates fresh environments and triggers CLI installer
-      // that fails on ARM64 Linux (no native binary available for linux-arm64)
-      return `hindsight-embed`;
+      // PyPI package: uvx hindsight-embed@version
+      const embedPackage = this.embedVersion ? `hindsight-embed@${this.embedVersion}` : 'hindsight-embed@latest';
+      return `uvx ${embedPackage}`;
     }
   }
 
