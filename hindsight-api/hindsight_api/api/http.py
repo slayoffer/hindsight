@@ -1161,7 +1161,7 @@ class CreateMentalModelRequest(BaseModel):
 class CreateMentalModelResponse(BaseModel):
     """Response model for mental model creation."""
 
-    mental_model_id: str = Field(description="ID of the created mental model")
+    mental_model_id: str | None = Field(None, description="ID of the created mental model")
     operation_id: str = Field(description="Operation ID to track refresh progress")
 
 
@@ -1916,17 +1916,17 @@ def _register_routes(app: FastAPI):
                 directives = []
                 for fact_type, facts in core_result.based_on.items():
                     if fact_type == "directives":
-                        # Directives have different structure (id, name, content)
+                        # Directives are dicts with id, name, content (not MemoryFact objects)
                         for directive in facts:
                             directives.append(
                                 ReflectDirective(
-                                    id=directive.id,
-                                    name=directive.name,
-                                    content=directive.content,
+                                    id=directive["id"],
+                                    name=directive["name"],
+                                    content=directive["content"],
                                 )
                             )
-                    elif fact_type == "mental_models":
-                        # Mental models are MemoryFact with type "mental_models"
+                    elif fact_type == "mental-models":
+                        # Mental models are MemoryFact with type "mental-models" (note: hyphen, not underscore)
                         for fact in facts:
                             mental_models.append(
                                 ReflectMentalModel(
