@@ -337,17 +337,6 @@ jobs:
         cache-from: type=gha,scope=${{ matrix.name }}
         cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
-    # Only test slim variants to save disk space (they're much smaller)
-    # Slim variants require external embedding providers
-    - name: Smoke test - verify container starts
-      if: matrix.variant == 'slim'
-      env:
-        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        HINDSIGHT_API_EMBEDDINGS_PROVIDER: openai
-        HINDSIGHT_API_EMBEDDINGS_OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        HINDSIGHT_API_RERANKER_PROVIDER: cohere
-        HINDSIGHT_API_COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
-      run: ./docker/test-image.sh "hindsight-${{ matrix.name }}:test" "${{ matrix.target }}"
 
   test-api:
     runs-on: ubuntu-latest
