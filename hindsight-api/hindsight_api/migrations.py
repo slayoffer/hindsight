@@ -485,15 +485,21 @@ def ensure_embedding_dimension(
             )
             logger.info(f"Created vchordrq index for {required_dimension}-dimensional embeddings")
         else:  # pgvector
-            conn.execute(
-                text(f"""
-                    CREATE INDEX IF NOT EXISTS idx_memory_units_embedding_hnsw
-                    ON {schema_name}.memory_units
-                    USING hnsw (embedding vector_cosine_ops)
-                    WITH (m = 16, ef_construction = 64)
-                """)
-            )
-            logger.info(f"Created HNSW index for {required_dimension}-dimensional embeddings")
+            if required_dimension > 2000:
+                logger.warning(
+                    f"Skipping HNSW index: embedding dimension {required_dimension} exceeds "
+                    f"pgvector HNSW limit of 2000 dims. Using sequential scan instead."
+                )
+            else:
+                conn.execute(
+                    text(f"""
+                        CREATE INDEX IF NOT EXISTS idx_memory_units_embedding_hnsw
+                        ON {schema_name}.memory_units
+                        USING hnsw (embedding vector_cosine_ops)
+                        WITH (m = 16, ef_construction = 64)
+                    """)
+                )
+                logger.info(f"Created HNSW index for {required_dimension}-dimensional embeddings")
         conn.commit()
 
         logger.info(f"Successfully changed embedding dimension to {required_dimension}")
@@ -638,15 +644,33 @@ def ensure_vector_extension(
                     """)
                 )
             else:  # pgvector
-                logger.info(f"Creating HNSW index on {table_name}")
-                conn.execute(
-                    text(f"""
-                        CREATE INDEX IF NOT EXISTS {index_name}
-                        ON {schema_name}.{table_name}
-                        USING hnsw (embedding vector_cosine_ops)
-                        WITH (m = 16, ef_construction = 64)
-                    """)
-                )
+                # Check embedding dimension — pgvector HNSW indexes only support up to 2000 dims
+                embed_dim = conn.execute(
+                    text("""
+                        SELECT atttypmod
+                        FROM pg_attribute a
+                        JOIN pg_class c ON a.attrelid = c.oid
+                        JOIN pg_namespace n ON c.relnamespace = n.oid
+                        WHERE n.nspname = :schema AND c.relname = :table_name AND a.attname = 'embedding'
+                    """),
+                    {"schema": schema_name, "table_name": table_name},
+                ).scalar()
+
+                if embed_dim and embed_dim > 2000:
+                    logger.warning(
+                        f"Skipping HNSW index on {table_name}: embedding dimension {embed_dim} exceeds "
+                        f"pgvector HNSW limit of 2000 dims. Using sequential scan instead."
+                    )
+                else:
+                    logger.info(f"Creating HNSW index on {table_name}")
+                    conn.execute(
+                        text(f"""
+                            CREATE INDEX IF NOT EXISTS {index_name}
+                            ON {schema_name}.{table_name}
+                            USING hnsw (embedding vector_cosine_ops)
+                            WITH (m = 16, ef_construction = 64)
+                        """)
+                    )
 
         conn.commit()
         logger.info(f"Successfully migrated vector indexes to {target_ext}")
