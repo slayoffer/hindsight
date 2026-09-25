@@ -9,17 +9,18 @@ resolution entry paths funnel through (retain via
    collapse to a single space, and the ends are stripped;
 2. a name that is empty afterwards is dropped rather than stored as an entity
    with a blank ``canonical_name``;
-3. candidates that normalization made identical are deduplicated per fact.
+3. a name longer than ``_MAX_ENTITY_NAME_CHARS`` is dropped rather than failing
+   the whole retain on the btree index over ``canonical_name``;
+4. candidates that normalization made identical are deduplicated per fact.
 
 All of it runs before the flat list / ``entity_to_unit`` mapping is derived, so
 the resolver's positional invariant is untouched.
 """
 
-import pytest
-
 import random
 
 import asyncpg
+import pytest
 
 from hindsight_api.engine.retain.link_utils import (
     _MAX_ENTITY_NAME_CHARS,
@@ -179,12 +180,18 @@ def _incompressible(n_chars: int) -> str:
 async def test_cap_fits_the_real_btree_limit_and_the_old_behaviour_did_not(pg0_db_url):
     """The cap is only meaningful if it clears the index at its worst case.
 
-    Same index shape as idx_entities_bank_name, on a temp table so nothing persists.
+    Same index shapes as idx_entities_bank_name and idx_entities_bank_lower_name,
+    on a temp table so nothing persists.
     """
     conn = await asyncpg.connect(pg0_db_url)
     try:
         await conn.execute("CREATE TEMP TABLE ent_cap (bank_id TEXT NOT NULL, canonical_name TEXT NOT NULL)")
         await conn.execute("CREATE INDEX ent_cap_bank_name ON ent_cap (bank_id, canonical_name)")
+        # Both btrees the real schema carries over the name: the plain one prod
+        # reported failing on, and the unique LOWER one the entity INSERT uses as
+        # its ON CONFLICT target. Same ~2704-byte tuple ceiling on either, so the
+        # cap has to clear both.
+        await conn.execute("CREATE UNIQUE INDEX ent_cap_bank_lower_name ON ent_cap (bank_id, LOWER(canonical_name))")
         long_bank = "slack-" + "X" * 120
 
         # At the cap, 4 bytes per character, incompressible, long bank id: fits.

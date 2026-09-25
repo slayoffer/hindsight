@@ -42,6 +42,10 @@ _WHITESPACE_RUN_RE = re.compile(r"\s+")
 # production bank set of ~11M entities the median was 13 characters and p99.9 was
 # 96; everything past a few hundred was an extraction artifact — SVG path data,
 # base64, a fragment of serialized JSON.
+# This cap counts characters, which is what the PostgreSQL btree needs. Oracle
+# declares canonical_name as VARCHAR2(512) — byte-counted — so a multibyte name
+# under this cap can still be rejected there; that is a narrower, pre-existing
+# limit of the Oracle schema, not something this cap is sized for.
 _MAX_ENTITY_NAME_CHARS = 512
 
 
