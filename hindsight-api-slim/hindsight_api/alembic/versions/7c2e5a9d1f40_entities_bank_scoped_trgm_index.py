@@ -31,18 +31,21 @@ Revises: d4f8b1c6e903
 Create Date: 2026-09-25
 """
 
+import logging
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import context, op
 
-from hindsight_api._pg_extensions import create_extension
+from hindsight_api._pg_extensions import create_extension, extension_schema
 from hindsight_api.alembic._dialect import run_for_dialect
 
 revision: str = "7c2e5a9d1f40"
 down_revision: str | Sequence[str] | None = "d4f8b1c6e903"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+logger = logging.getLogger(__name__)
 
 _OLD_INDEX = "entities_canonical_name_lower_trgm_nonlabel_idx"
 _NEW_INDEX = "entities_bank_lower_name_trgm_nonlabel_idx"
@@ -52,12 +55,6 @@ def _pg_schema_prefix() -> str:
     """Schema-qualifier for raw SQL on PG (multi-tenant search_path)."""
     schema = context.config.get_main_option("target_schema")
     return f'"{schema}".' if schema else ""
-
-
-def _has_extension(bind: sa.Connection, name: str) -> bool:
-    return bool(
-        bind.execute(sa.text("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = :n)"), {"n": name}).scalar()
-    )
 
 
 def _drop_invalid_leftover(bind: sa.Connection, index_name: str) -> None:
@@ -88,7 +85,7 @@ def _pg_upgrade() -> None:
     bind = op.get_bind()
     schema = _pg_schema_prefix()
 
-    if not _has_extension(bind, "pg_trgm"):
+    if extension_schema(bind, "pg_trgm") is None:
         return
 
     # btree_gin supplies the GIN opclass for the text bank_id column. Pinned to
@@ -97,7 +94,14 @@ def _pg_upgrade() -> None:
     try:
         with bind.begin_nested():
             create_extension(bind, "btree_gin")
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "btree_gin is not available (%s); keeping the bank-agnostic entities trigram index. "
+            "Fuzzy entity probes stay correct but scan every bank. Install btree_gin and build %s by hand "
+            "to get the bank-scoped index.",
+            exc,
+            _NEW_INDEX,
+        )
         return
 
     # CREATE/DROP INDEX CONCURRENTLY cannot run inside a transaction block.
@@ -117,7 +121,7 @@ def _pg_downgrade() -> None:
     bind = op.get_bind()
     schema = _pg_schema_prefix()
 
-    if not _has_extension(bind, "pg_trgm"):
+    if extension_schema(bind, "pg_trgm") is None:
         return
 
     # Restore the bank-agnostic index before dropping the scoped one so fuzzy

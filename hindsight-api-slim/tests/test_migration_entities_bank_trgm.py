@@ -159,3 +159,34 @@ def test_downgrade_restores_bank_agnostic_index(head_db_url):
     finally:
         command.upgrade(cfg, "heads")
         engine.dispose()
+
+
+def test_upgrade_keeps_old_index_when_btree_gin_is_unavailable(head_db_url, monkeypatch):
+    """Managed Postgres without btree_gin keeps the bank-agnostic index instead of failing the migration."""
+    import hindsight_api._pg_extensions as pg_extensions
+
+    real_create_extension = pg_extensions.create_extension
+
+    def _unavailable(conn, name, *, cascade=False):
+        if name == "btree_gin":
+            raise RuntimeError('extension "btree_gin" is not available')
+        return real_create_extension(conn, name, cascade=cascade)
+
+    cfg = _alembic_cfg(head_db_url)
+    engine = create_engine(head_db_url)
+    try:
+        command.downgrade(cfg, _PRE_REVISION)
+        # Alembic re-imports the revision module on each command, so the migration
+        # binds the patched helper.
+        monkeypatch.setattr(pg_extensions, "create_extension", _unavailable)
+        command.upgrade(cfg, _REVISION)
+        with engine.connect() as conn:
+            assert _index_def(conn, _OLD_INDEX) is not None, "the old index must stay when btree_gin is missing"
+            assert _index_def(conn, _NEW_INDEX) is None
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar() == _REVISION
+    finally:
+        monkeypatch.undo()
+        engine.dispose()
+        # Rebuild the scoped index for any later test in this module.
+        command.downgrade(cfg, _PRE_REVISION)
+        command.upgrade(cfg, "heads")
